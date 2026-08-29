@@ -1524,10 +1524,28 @@
     };
   }
 
-  function sendTree(path) {
+  /*
+   * The reply must carry the request id it was asked with.
+   *
+   * The panel drives this by listening for the message type alone, so the id
+   * was never missed there. An outside caller cannot: __dpAsk pairs a reply to
+   * its request by `rid`, and a dp:tree without one matched nothing, waited
+   * out the eight-second timeout, and came back as "The page did not answer in
+   * time. Is it loaded through the proxy?" — which sent whoever read it to go
+   * and check the proxy, which was fine. custom_ai_view_tree had never once
+   * returned a tree.
+   *
+   * `rid` is left off entirely when the panel asks, so nothing there changes.
+   */
+  function sendTree(path, rid) {
+    var reply = function (extra) {
+      var msg = { type: 'dp:tree', path: path || [] };
+      if (rid) msg.rid = rid;
+      toParent(Object.assign(msg, extra));
+    };
     var el = nodeAt(path);
     if (!el) {
-      toParent({ type: 'dp:tree', path: path, children: [], error: 'gone' });
+      reply({ children: [], error: 'gone' });
       return;
     }
     var kids = elementChildren(el);
@@ -1537,9 +1555,7 @@
     for (var i = 0; i < limit; i++) {
       children.push(nodeSummary(kids[i], (path || []).concat([i])));
     }
-    toParent({
-      type: 'dp:tree',
-      path: path || [],
+    reply({
       children: children,
       truncated: kids.length - limit,
       root: (path || []).length === 0 ? nodeSummary(el, []) : null,
@@ -1777,7 +1793,7 @@
         break;
       case 'dp:cmd:tree':
         safe('tree', function () {
-          sendTree(data.path || []);
+          sendTree(data.path || [], data.rid);
         });
         break;
       case 'dp:cmd:hover-path':
