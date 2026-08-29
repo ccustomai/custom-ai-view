@@ -29,6 +29,97 @@ const { spawn } = require('child_process');
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
+/*
+ * Temporary directories, and getting rid of them.
+ *
+ * Every capture runs a headless Chrome in a throwaway profile, and every
+ * recording collects its frames in a folder of its own. Both were removed on
+ * the way out — once, half a second after the browser was killed. On Windows
+ * that is too early: Chrome still holds handles, rmSync throws, and the error
+ * was swallowed as harmless. It was not harmless. Thirty-five abandoned
+ * profiles, the oldest four days old, came to half a gigabyte.
+ *
+ * So two changes. The removal now waits for the handles to go, over several
+ * attempts. And because no amount of patience helps a process that was killed
+ * outright, anything left behind by an earlier run is swept at startup.
+ */
+const TEMP_PREFIXES = [
+  'custom-ai-view-shot-',
+  'custom-ai-view-rec-',
+  // What the same directories were called before the rename. Machines that ran
+  // an older build still have them, and nothing else will ever clear them.
+  'device-preview-shot-',
+  'device-preview-rec-',
+];
+
+/** Delete a directory once whatever was holding it lets go. */
+function removeWhenReleased(dir, attempt) {
+  const n = attempt || 0;
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return;
+  } catch {
+    /* still held */
+  }
+  // 0.4s, 1s, 2s, 4s, 8s. Chrome has always let go well inside that; if it has
+  // not, the sweep below will collect the directory on the next run.
+  if (n < 5) setTimeout(() => removeWhenReleased(dir, n + 1), 400 * Math.pow(2, n));
+}
+
+/**
+ * Clear out what earlier runs left behind.
+ *
+ * Only directories older than half an hour, so a capture running right now in
+ * another window is never pulled out from under it. Best effort throughout: a
+ * machine that will not let us tidy up is not a machine that should fail to
+ * take a screenshot.
+ */
+let swept = false;
+function sweepAbandonedTemp(log) {
+  if (swept) return;
+  swept = true;
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  let removed = 0;
+  let bytes = 0;
+  try {
+    for (const name of fs.readdirSync(os.tmpdir())) {
+      if (!TEMP_PREFIXES.some(p => name.startsWith(p))) continue;
+      const dir = path.join(os.tmpdir(), name);
+      try {
+        const st = fs.statSync(dir);
+        if (!st.isDirectory() || st.mtimeMs > cutoff) continue;
+        bytes += dirSize(dir);
+        fs.rmSync(dir, { recursive: true, force: true });
+        removed++;
+      } catch {
+        /* in use, or gone between the listing and the look */
+      }
+    }
+  } catch {
+    /* no temp directory to read is not a reason to fail */
+  }
+  if (removed && log) {
+    log('swept ' + removed + ' abandoned capture folder' + (removed === 1 ? '' : 's')
+      + ' (' + (bytes / 1048576).toFixed(0) + ' MB)');
+  }
+}
+
+function dirSize(dir) {
+  let total = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const here = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(here, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      const p = path.join(here, e.name);
+      if (e.isDirectory()) stack.push(p);
+      else { try { total += fs.statSync(p).size; } catch { /* gone between the listing and the look */ } }
+    }
+  }
+  return total;
+}
+
 // ------------------------------------------------------------- WebSocket
 
 class WebSocketClient {
@@ -324,6 +415,8 @@ class HeadlessBrowser {
     if (!this.chromePath) throw new Error('No Chrome or Edge found. Set customAIView.chromePath.');
 
     this._starting = (async () => {
+      // Before making another one, collect the ones earlier runs did not.
+      sweepAbandonedTemp(msg => this.log(msg));
       this.profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-ai-view-shot-'));
       const args = [
         '--headless=new',
@@ -439,15 +532,12 @@ class HeadlessBrowser {
     if (this.profileDir) {
       const dir = this.profileDir;
       this.profileDir = null;
-      setTimeout(() => {
-        try {
-          fs.rmSync(dir, { recursive: true, force: true });
-        } catch {
-          /* the browser may still hold a handle; the temp dir is disposable */
-        }
-      }, 500);
+      removeWhenReleased(dir);
     }
   }
 }
 
-module.exports = { WebSocketClient, CdpSession, HeadlessBrowser, findChrome };
+module.exports = {
+  WebSocketClient, CdpSession, HeadlessBrowser, findChrome,
+  sweepAbandonedTemp, removeWhenReleased,
+};

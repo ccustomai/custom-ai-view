@@ -32,7 +32,7 @@ const { PreviewProxy, probeFraming, discoverDevServers, UA } = require('../src/p
 const { Capturer } = require('../src/capture.js');
 const { copyImage } = require('../src/clipboard.js');
 const { ControlServer } = require('../src/control.js');
-const { CdpSession, findChrome } = require('../src/cdp.js');
+const { CdpSession, findChrome, sweepAbandonedTemp } = require('../src/cdp.js');
 const { detect: detectDisplay } = require('../src/display.js');
 const { Library } = require('../src/library.js');
 const { DEVICES, byId, oriented, pointerFor } = require('../src/devices.js');
@@ -320,6 +320,18 @@ class AppHost {
 
     await this.proxy.start();
     await this.startControlApi();
+
+    /*
+     * Take out the litter before doing anything else.
+     *
+     * A capture that was interrupted — the app killed, the machine restarted —
+     * leaves its throwaway Chrome profile behind, and nothing else on the system
+     * will ever remove it. On this machine thirty-five of them had accumulated
+     * over four days and come to half a gigabyte. Doing it at startup rather
+     * than only before the next capture means it also happens for someone who
+     * never takes one.
+     */
+    sweepAbandonedTemp(msg => this.log(msg));
 
     // Physical panel size, so a device can be drawn at its true size.
     try {
