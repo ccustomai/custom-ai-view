@@ -33,7 +33,10 @@ jobs:
           - os: macos-14
             label: macOS (Apple silicon)
             arch: arm64
-          - os: macos-13
+          # macos-13 is gone: a job asking for it is accepted and then sits in
+          # the queue for ever, which looks like a slow build rather than a
+          # build that will never start. macos-15-intel is the Intel image now.
+          - os: macos-15-intel
             label: macOS (Intel)
             arch: x64
           - os: windows-latest
