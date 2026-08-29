@@ -585,6 +585,68 @@ const TOOLS = [
       return { text: 'Went ' + (args.direction === 'forward' ? 'forward' : 'back') + '.' };
     },
   },
+  /*
+   * Windows.
+   *
+   * Every tool here takes a `window`, which was worth nothing while there was no
+   * way to make a second one or to learn the id of the first. An agent asked to
+   * "check this on the phone and the tablet" could only switch the one window
+   * back and forth, losing the page each time and never seeing them together.
+   */
+  {
+    name: 'custom_ai_view_windows',
+    description:
+      'List the open device windows: id, device, orientation, page title and address. '
+      + 'Every other tool takes a `window` id, and this is where the ids come from — '
+      + 'call it before driving two devices, or to find out what the person already has open.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    run: async () => {
+      const r = await call('/windows', {});
+      const list = r.windows || [];
+      if (!list.length) return { text: 'No windows are open.' };
+      return {
+        text: list.length + ' window' + (list.length === 1 ? '' : 's') + ':\n'
+          + list.map(w => '  ' + w.id + '  ' + w.device + ' ' + w.orientation
+            + '\n      ' + (w.title ? w.title + ' — ' : '') + (w.url || '(start page)')).join('\n'),
+      };
+    },
+  },
+  {
+    name: 'custom_ai_view_new_window',
+    description:
+      'Open another device window, so two devices can be compared side by side without '
+      + 'either losing its page. Returns the id to pass as `window` to the other tools. '
+      + 'Prefer this to switching one window back and forth: changing the device on a window '
+      + 'reloads it, and a single-page app comes back at its start rather than where you were.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Open this address. Omit for the start page.' },
+        device: { type: 'string', description: 'Device id, e.g. iphone-16-pro. Omit for the default.' },
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/new-window', args);
+      return { text: 'Opened ' + (r.device || 'a window') + ' as window ' + r.window + '.' };
+    },
+  },
+  {
+    name: 'custom_ai_view_close_window',
+    description:
+      'Close one device window. Use it to tidy up after a comparison — windows opened by an '
+      + 'agent otherwise stay on the person\'s desk. Closing the last one leaves the app running.',
+    inputSchema: {
+      type: 'object',
+      required: ['window'],
+      properties: { window: { type: 'string', description: 'The id from custom_ai_view_windows.' } },
+      additionalProperties: false,
+    },
+    run: async args => {
+      await call('/close-window', args);
+      return { text: 'Closed window ' + args.window + '.' };
+    },
+  },
   {
     name: 'custom_ai_view_key',
     description:
