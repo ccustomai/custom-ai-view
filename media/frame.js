@@ -236,6 +236,14 @@
     // On a notched Mac the bar is exactly as tall as the notch, so the notch reads as
     // cut out of it rather than sitting on top of it.
     var menuBarHeight = macMenuBar ? (d.cutout === 'mac-notch' ? d.ch : 24) : 0;
+    /*
+     * ...and the notch is drawn to whichever bar is actually on screen, so it can
+     * never hang below one as a black tab. With the browser chrome shown that is the
+     * chrome's own menu bar; without it, the one drawn above.
+     */
+    var notchHeight = d.cutout === 'mac-notch'
+      ? (chromeOn ? ((d.chrome && d.chrome.menuBar) || d.ch) : menuBarHeight)
+      : d.ch;
     var padTop = chromeOn
       ? (isMac ? chromeTop : d.safeTop + (d.chrome.top || 0))
       : (overlay ? 0 : isMac ? menuBarHeight : statusInset);
@@ -306,6 +314,7 @@
       '--chrome-b': chromeBottom + 'px',
       '--menu-h': ((d.chrome && d.chrome.menuBar) || 0) + 'px',
       '--macbar-h': menuBarHeight + 'px',
+      '--notch-h': notchHeight + 'px',
       '--sb-h': statusHeight + 'px',
       '--sb-pad': sbPad + 'px',
       '--sb-pad-l': sbPadLeft + 'px',
@@ -434,7 +443,8 @@
         // Room below the lid for the half you type on, or for a display's stand.
         // Keep in step with .dev-base and .dev-stand: too small and the capture cuts
         // the base in half, which is how the frame came to look like a monitor.
-        var extra = isMac && d.kind === 'laptop' ? 30 : isMac && d.kind === 'desktop' ? 90 : 0;
+        var extra = isMac && d.kind === 'laptop' ? Math.round(d.w * 0.021) + 6
+          : isMac && d.kind === 'desktop' ? 90 : 0;
         return {
           w: bodyW * scale,
           h: (bodyH + extra) * scale,

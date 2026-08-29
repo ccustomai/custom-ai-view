@@ -8,7 +8,7 @@
 /*
  * Control API.
  *
- * The MCP server runs as its own process, spawned by Claude, so it needs a way to
+ * The MCP server runs as its own process, spawned by the agent, so it needs a way to
  * reach the extension. This is that door: a token-protected HTTP server bound to
  * 127.0.0.1, announced through a small file in the user's home directory so the MCP
  * server can find it without any configuration.

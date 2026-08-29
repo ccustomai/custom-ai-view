@@ -2,7 +2,7 @@
 
 **A real browser inside pixel-accurate device frames — that an AI agent can drive and
 see.** iPhone, iPad, Android, MacBook. Ships as a Windows app and as a VS Code
-extension, with an MCP server so Claude looks at the same window you do.
+extension, with an MCP server so your AI assistant looks at the same window you do.
 
 [ccustom.ai/view](https://ccustom.ai/view) · by [Custom AI](https://ccustom.ai)
 
@@ -62,14 +62,20 @@ your desktop: `node scripts/make-launcher.js`.
 **VS Code extension** — download the `.vsix` from Releases and
 `code --install-extension custom-ai-view-<version>.vsix`, then reload the window.
 
-**For Claude Code**
+**For your AI assistant** — the server speaks MCP over stdio, so any MCP client takes
+the same block:
 
-```
-claude mcp add custom-ai-view --scope user -- node <path>/mcp/server.js
+```json
+{
+  "mcpServers": {
+    "custom-ai-view": { "command": "node", "args": ["<path>/mcp/server.js"] }
+  }
+}
 ```
 
-The MCP server starts the app itself if it is not running, so an agent never has to
-ask a human to open something first.
+In VS Code, **Custom AI View: Show MCP Server Setup** hands you that block with the
+path already filled in. The MCP server starts the app itself if it is not running, so
+an agent never has to ask a human to open something first.
 
 ## Build from source
 

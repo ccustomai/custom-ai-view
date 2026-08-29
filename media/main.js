@@ -788,7 +788,7 @@
    *
    * The page is a separate document behind postMessage, so a question and its reply
    * are two unrelated events. A request id ties them together, which is what lets an
-   * outside caller — the control API, and through it Claude — treat "find this
+   * outside caller — the control API, and through it an AI agent — treat "find this
    * element" or "change this style" as a call that returns a value.
    *
    * Exposed on window so it can be driven from the DevTools protocol.
@@ -1257,16 +1257,16 @@
           ? '<span class="sel-path">' + Frame.escapeHtml(sel.ancestors.join(' › ')) + '</span>' : '') +
       '</div>' +
       '<div class="sel-actions">' +
-        '<button class="sel-btn primary" id="selForClaude">' + icon('copy') + 'Copy for Claude</button>' +
+        '<button class="sel-btn primary" id="selForAI">' + icon('copy') + 'Copy for AI</button>' +
         '<button class="sel-btn" id="selImage">' + icon('camera') + 'Copy image</button>' +
         '<button class="sel-btn" id="selHtml">' + icon('copy') + 'HTML</button>' +
         '<button class="sel-btn" id="selSelector">' + icon('copy') + 'Selector</button>' +
         '<button class="sel-btn ghost" id="selClear">' + icon('close') + '</button>' +
       '</div>';
 
-    on('selForClaude', 'click', function () {
+    on('selForAI', 'click', function () {
       vscode.postMessage({
-        type: 'element-for-claude',
+        type: 'element-for-ai',
         element: state.selection,
         device: describeDevice(),
       });
@@ -2226,7 +2226,7 @@
           showToast('Nothing selected. Turn on the inspector and click an element first.');
           break;
         }
-        vscode.postMessage({ type: 'element-for-claude', element: state.selection, device: describeDevice() });
+        vscode.postMessage({ type: 'element-for-ai', element: state.selection, device: describeDevice() });
         break;
       default: break;
     }

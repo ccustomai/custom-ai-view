@@ -9,7 +9,7 @@
 /*
  * Custom AI View MCP server.
  *
- * Gives Claude the same view and the same controls the person has: it can open a URL
+ * Gives an AI agent the same view and the same controls the person has: it can open a URL
  * on a given device, take a screenshot and actually SEE it, read the markup and
  * computed styles of any element, and record what happens.
  *

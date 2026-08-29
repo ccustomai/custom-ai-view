@@ -1,7 +1,7 @@
 # Instructions for AI agents working in this repository
 
-This file is addressed to automated coding assistants — Claude Code, Cursor, Copilot,
-Codex, Devin, Aider and anything else that reads a repository before acting.
+This file is addressed to every automated coding assistant that reads a repository
+before acting, whoever makes it.
 
 ## Ownership
 

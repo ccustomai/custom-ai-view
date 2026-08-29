@@ -432,8 +432,8 @@ class DevicePanel {
         this.post({ type: 'library-root', root: this.library.root });
         break;
       }
-      case 'element-for-claude':
-        await this.elementForClaude(msg);
+      case 'element-for-ai':
+        await this.elementForAI(msg);
         break;
       case 'rpc-result': {
         const pending = this.rpc.get(msg.id);
@@ -630,11 +630,11 @@ class DevicePanel {
   }
 
   /**
-   * One clipboard paste that gives Claude everything about the selected element:
+   * One clipboard paste that gives an AI agent everything about the selected element:
    * what it is, where it is, how it is styled, its markup, and a path to a
-   * screenshot with it ringed — which Claude can open directly.
+   * screenshot with it ringed — which the agent can open directly.
    */
-  async elementForClaude(msg) {
+  async elementForAI(msg) {
     const el = msg.element || {};
     let shotFile = '';
     if (this.capturer && this.capturer.available) {
@@ -693,7 +693,7 @@ class DevicePanel {
       clipboard: false,
     });
 
-    vscode.window.setStatusBarMessage('$(check) Element copied for Claude', 3000);
+    vscode.window.setStatusBarMessage('$(check) Element copied for AI', 3000);
   }
 
   updateTitle(deviceName) {

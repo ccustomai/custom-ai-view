@@ -16,7 +16,7 @@
  * shim instead of VS Code's: messages up over POST, messages down over an
  * EventSource stream. That keeps one implementation of the panel, not two.
  *
- * Because every window is a real Chrome page, Claude can attach to it over the
+ * Because every window is a real Chrome page, an AI agent can attach to it over the
  * DevTools protocol and see exactly what you see — not a re-render of it.
  */
 'use strict';
@@ -589,8 +589,8 @@ class AppHost {
       case 'record':
         await this.record(session, msg);
         break;
-      case 'element-for-claude':
-        await this.elementForClaude(session, msg);
+      case 'element-for-ai':
+        await this.elementForAI(session, msg);
         break;
       case 'selection':
         session.selection = msg.element;
@@ -957,7 +957,7 @@ class AppHost {
     return result;
   }
 
-  async elementForClaude(session, msg) {
+  async elementForAI(session, msg) {
     const el = msg.element || {};
     let shotFile = '';
     if (this.capturer.available) {
@@ -1066,7 +1066,7 @@ class AppHost {
   /**
    * Each window is a Chrome app window: no tabs, no address bar, its own taskbar
    * entry. They share one browser process and one profile, so opening the fifth one
-   * costs almost nothing — and every one of them is a CDP target Claude can attach to.
+   * costs almost nothing — and every one of them is a CDP target an agent can attach to.
    */
   async openWindow(url, deviceId) {
     const chrome = findChrome(this.settings.chromePath);
@@ -1281,7 +1281,7 @@ class AppHost {
      * The control API answers before the first window exists.
      *
      * Starting the app and immediately steering it is the normal case, not an odd
-     * one — it is exactly what happens when Claude launches the exe itself and calls
+     * one — it is exactly what happens when an agent launches the exe itself and calls
      * a tool in the same breath. In that gap there is no session, and taking that to
      * mean "no windows, open one" opened a SECOND window: the caller then drove one
      * window while looking at the other, which reads as "the tool shows an empty
@@ -1514,7 +1514,7 @@ class AppHost {
           return { entries: session.consoleLog.slice(-limit) };
         },
 
-        // Real input and real edits in the real window, so Claude can drive and
+        // Real input and real edits in the real window, so an agent can drive and
         // change the page the person is looking at.
         '/click': async body => this.ask(body, { type: 'dp:cmd:input', kind: 'click', selector: body.selector }, 'dp:input-done'),
         '/type': async body => this.ask(body, {

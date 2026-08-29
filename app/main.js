@@ -31,7 +31,7 @@ const HANDSHAKE = path.join(os.homedir(), '.custom-ai-view', 'control.json');
  * Pressing a pinned icon twice should give a second device window, not a second
  * application. Two of these processes fight: each starts its own servers and each
  * overwrites the handshake file, so whichever wrote last owns the name — and
- * Claude, which finds the app through that file, ends up driving one window while
+ * an agent, which finds the app through that file, ends up driving one window while
  * the person is looking at the other.
  */
 function askRunningApp(info, route, body, timeoutMs) {

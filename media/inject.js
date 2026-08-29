@@ -960,7 +960,7 @@
   // ------------------------------------------------------- console capture
 
   /*
-   * Forwarded to the panel so Claude can read what the page logged. Without this the
+   * Forwarded to the panel so an agent can read what the page logged. Without this the
    * console of a framed cross-origin page is completely invisible from outside.
    */
   safe('console capture', function () {
@@ -1013,7 +1013,7 @@
   // --------------------------------------------------------- element inspector
 
   /*
-   * Hover to outline, click to select. The point is to hand Claude something it can
+   * Hover to outline, click to select. The point is to hand the agent something it can
    * actually reason about: the element's markup, its resolved styles, its box, and
    * where it sits in the tree — not just a screenshot of it.
    */

@@ -165,19 +165,23 @@ function activate(context) {
 
   register('customAIView.mcpCommand', async () => {
     const serverPath = vscode.Uri.joinPath(context.extensionUri, 'mcp', 'server.js').fsPath;
-    const cmd = `claude mcp add custom-ai-view --scope user -- node "${serverPath}"`;
+    // The block every MCP client takes, with the path already resolved — the point of
+    // the command is that nobody has to work out where the extension unpacked itself.
+    const config = JSON.stringify({
+      mcpServers: { 'custom-ai-view': { command: 'node', args: [serverPath] } },
+    }, null, 2);
     const pick = await vscode.window.showInformationMessage(
-      'Register the Custom AI View MCP server with Claude Code by running this once in a terminal.',
-      'Copy command',
-      'Run in terminal'
+      'Custom AI View speaks MCP. Add this server to your AI assistant once, and it can '
+      + 'drive this window and see what you see.',
+      'Copy config',
+      'Copy server path'
     );
-    if (pick === 'Copy command') {
-      await vscode.env.clipboard.writeText(cmd);
-      vscode.window.setStatusBarMessage('$(check) Command copied', 3000);
-    } else if (pick === 'Run in terminal') {
-      const term = vscode.window.createTerminal('Custom AI View MCP');
-      term.show();
-      term.sendText(cmd);
+    if (pick === 'Copy config') {
+      await vscode.env.clipboard.writeText(config);
+      vscode.window.setStatusBarMessage('$(check) MCP config copied', 3000);
+    } else if (pick === 'Copy server path') {
+      await vscode.env.clipboard.writeText(serverPath);
+      vscode.window.setStatusBarMessage('$(check) Server path copied', 3000);
     }
   });
 
@@ -210,7 +214,7 @@ function activate(context) {
 }
 
 /**
- * The door the MCP server knocks on, so Claude gets the same view and the same
+ * The door the MCP server knocks on, so an AI agent gets the same view and the same
  * controls the person has. Every route works whether or not a panel is open: the
  * ones that need pixels drive a headless browser through the same proxy.
  */

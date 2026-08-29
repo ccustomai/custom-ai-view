@@ -457,29 +457,42 @@
 
   const macs = [
     d(MAC, {
+      /*
+       * A MacBook's chin is three times its forehead — the wordmark is etched down
+       * there and the antenna runs behind it. What matters below is the RATIO: the
+       * physical merge keeps t/(t+b) and re-derives the rest from the millimetres,
+       * so a uniform bezel here quietly produced a symmetric lid no Mac has.
+       */
       id: 'macbook-pro-16', name: 'MacBook Pro 16"', year: 2024,
-      w: 1728, h: 1117, bezel: 9, radius: 14, cutout: 'mac-notch', cw: 180, ch: 32, ct: 0,
+      w: 1728, h: 1117, bezel: { t: 18, r: 18, b: 58, l: 18 },
+      radius: 14, cutout: 'mac-notch', cw: 180, ch: 32, ct: 0,
       buttons: BTN.none(),
     }),
     d(MAC, {
       id: 'macbook-pro-14', name: 'MacBook Pro 14"', year: 2024,
-      w: 1512, h: 982, bezel: 9, radius: 14, cutout: 'mac-notch', cw: 165, ch: 30, ct: 0,
+      w: 1512, h: 982, bezel: { t: 17, r: 17, b: 52, l: 17 },
+      radius: 14, cutout: 'mac-notch', cw: 165, ch: 30, ct: 0,
       buttons: BTN.none(),
     }),
     d(MAC, {
       // 1710 × 1107, not 1112 — the 15" Air's panel aspect is 1.5451, not the 13"'s.
       id: 'macbook-air-15', name: 'MacBook Air 15"', year: 2024,
-      w: 1710, h: 1107, bezel: 10, cutout: 'mac-notch', cw: 170, ch: 30, ct: 0,
+      w: 1710, h: 1107, bezel: { t: 22, r: 22, b: 58, l: 22 },
+      cutout: 'mac-notch', cw: 170, ch: 30, ct: 0,
       buttons: BTN.none(),
     }),
     d(MAC, {
       id: 'macbook-air-13', name: 'MacBook Air 13"', year: 2024,
-      w: 1470, h: 956, bezel: 10, cutout: 'mac-notch', cw: 160, ch: 30, ct: 0,
+      w: 1470, h: 956, bezel: { t: 20, r: 20, b: 52, l: 20 },
+      cutout: 'mac-notch', cw: 160, ch: 30, ct: 0,
       buttons: BTN.none(),
     }),
     d(MAC, {
+      // The last of the thick-bezel Pros: 9 mm of black glass at the sides and a
+      // 19 mm chin, which is why it reads as an older machine at a glance.
       id: 'macbook-pro-13', name: 'MacBook Pro 13" (Intel / M1)', year: 2020,
-      w: 1440, h: 900, bezel: 14, cutout: 'none', buttons: BTN.none(),
+      w: 1440, h: 900, bezel: { t: 44, r: 44, b: 92, l: 44 },
+      radius: 4, cutout: 'none', buttons: BTN.none(),
     }),
     d(MAC, {
       // The default "looks like" mode is the exact 1:2 of the 4480 × 2520 panel.
