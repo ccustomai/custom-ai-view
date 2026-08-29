@@ -1,8 +1,14 @@
 # Custom AI View
 
-**A real browser inside pixel-accurate device frames — that an AI agent can drive and
-see.** iPhone, iPad, Android, MacBook. Ships as a Windows app and as a VS Code
-extension, with an MCP server so your AI assistant looks at the same window you do.
+**See any website the way it looks on a real phone — and let an AI agent see it too.**
+
+A real browser inside pixel-accurate device frames: iPhone, iPad, Android, MacBook.
+Ships as a Windows app, a Mac app and a VS Code extension, with an MCP server so your
+AI assistant looks at the same window you do, over the Model Context Protocol.
+
+If you have ever wanted to *view a site as on mobile*, *preview responsive design on a
+real device frame*, or *give an AI agent eyes on your own browser window* — that is
+what this is.
 
 [ccustom.ai/view](https://ccustom.ai/view) · by [Custom AI](https://ccustom.ai)
 
