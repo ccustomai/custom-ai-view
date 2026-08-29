@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ccustomai/custom-ai-view",
   "title": "Custom AI View",
-  "description": "See any website the way it looks on a real iPhone, iPad, Android phone or MacBook, and drive that same window: open a URL on a device, take a screenshot of the live window, find and click elements, read markup and computed styles, watch the console, and record. Device frames are measured in millimetres from published specifications.",
+  "description": "See any site as it looks on a real iPhone, iPad or MacBook — and drive that window over MCP.",
   "version": "1.14.0",
   "websiteUrl": "https://ccustom.ai/view",
   "repository": {
@@ -11,10 +11,12 @@
   },
   "packages": [
     {
-      "registryType": "npm",
-      "identifier": "custom-ai-view-mcp",
-      "version": "1.14.0",
-      "transport": { "type": "stdio" }
+      "registryType": "mcpb",
+      "identifier": "https://github.com/ccustomai/custom-ai-view/releases/download/v1.14.0/custom-ai-view.mcpb",
+      "fileSha256": "ab7670b12ab3882626671150c00f79b5d1826eaf647d61b2e34f720558714292",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ]
 }
