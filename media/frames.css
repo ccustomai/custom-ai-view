@@ -1,0 +1,789 @@
+/*
+ * Device frames.
+ *
+ * Every frame is drawn with CSS — no bitmaps — so it stays sharp at any zoom and
+ * any device in the catalogue gets a correct body without an artwork file.
+ *
+ * Custom properties set per device by frame.js:
+ *   --w  --h        screen size in CSS px (= the iframe viewport)
+ *   --r             screen corner radius
+ *   --bt --br --bb --bl   bezel thickness per side
+ *   --safe-t --safe-b     safe-area insets
+ *   --cw --ch --ct        cutout width / height / offset from the top
+ *   --scale         display zoom
+ */
+
+/* ------------------------------------------------------------ finishes */
+
+.dev {
+  --metal-1: #4a4e55;
+  --metal-2: #2b2e34;
+  --metal-3: #6b7078;
+  --glass: #000;
+  --sb-fg: #000;
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/*
+ * A CSS transform scales the device visually but leaves its layout box at full
+ * size, so the shell carries the scaled dimensions and the transformed frame is
+ * taken out of flow inside it. Without this the unscaled box shoves the label
+ * and every neighbouring device off the stage.
+ */
+.dev-shell {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.dev[data-finish='graphite'] { --metal-1: #55585f; --metal-2: #2c2f35; --metal-3: #7d828b; }
+.dev[data-finish='black']    { --metal-1: #2a2b2e; --metal-2: #131416; --metal-3: #4a4c51; }
+.dev[data-finish='silver']   { --metal-1: #cfd3d8; --metal-2: #9aa0a8; --metal-3: #f2f4f7; }
+.dev[data-finish='gold']     { --metal-1: #d9c39d; --metal-2: #a8916c; --metal-3: #f0e2c6; }
+.dev[data-finish='desert']   { --metal-1: #c6ab92; --metal-2: #97795f; --metal-3: #e6d3bf; }
+.dev[data-finish='blue']     { --metal-1: #46586e; --metal-2: #26313f; --metal-3: #6d8299; }
+
+.dev[data-sb='light'] { --sb-fg: #fff; }
+.dev[data-sb='dark']  { --sb-fg: #000; }
+.dev[data-sb='light'] .dev-screen { background: #000; }
+
+/* ------------------------------------------------------------ structure */
+
+.dev-scale {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: scale(var(--scale, 1));
+  transform-origin: top left;
+  will-change: transform;
+}
+
+.dev-body {
+  position: relative;
+  width: calc(var(--w) + var(--bl) + var(--br));
+  height: calc(var(--h) + var(--bt) + var(--bb));
+  border-radius: var(--body-r, calc(var(--r) + var(--bl)));
+  background:
+    linear-gradient(118deg,
+      var(--metal-3) 0%,
+      var(--metal-1) 12%,
+      var(--metal-2) 38%,
+      var(--metal-1) 62%,
+      var(--metal-3) 88%,
+      var(--metal-2) 100%);
+  padding: var(--bt) var(--br) var(--bb) var(--bl);
+  box-sizing: border-box;
+  isolation: isolate;
+}
+
+.dev[data-shadow='on'] .dev-body {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, .28),
+    0 18px 36px rgba(0, 0, 0, .34),
+    0 48px 90px rgba(0, 0, 0, .38);
+}
+
+/* the thin polished edge every glass-backed phone has */
+.dev-body::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .22),
+    inset 0 0 0 2.5px rgba(0, 0, 0, .35);
+  z-index: 4;
+}
+
+.dev-screen {
+  position: relative;
+  width: var(--w);
+  height: var(--h);
+  border-radius: var(--r);
+  overflow: hidden;
+  /* Shows through the status-bar strip when the page is inset below it, so the
+     strip matches the glyph colour instead of being a white band on a dark app. */
+  background: #fff;
+  z-index: 1;
+  /* keeps the iframe corners clipped in Chromium */
+  transform: translateZ(0);
+}
+
+.dev-page {
+  position: absolute;
+  left: var(--pad-l, 0px);
+  right: var(--pad-r, 0px);
+  top: var(--pad-t, 0px);
+  bottom: var(--pad-b, 0px);
+  overflow: hidden;
+  background: transparent;
+}
+
+.dev-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: normal;
+}
+
+/* Desktop-only pages fall back to a 980px layout, exactly like mobile Safari. */
+.dev-page[data-fallback='980'] .dev-frame {
+  width: 980px;
+  height: calc(100% / var(--fallback-scale, 1));
+  transform: scale(var(--fallback-scale, 1));
+  transform-origin: top left;
+}
+
+/* ------------------------------------------------------------ cutouts */
+
+.dev-cutout {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  background: #000;
+}
+
+.dev[data-cutout='notch'] .dev-cutout {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--cw);
+  height: var(--ch);
+  border-radius: 0 0 calc(var(--ch) * .62) calc(var(--ch) * .62);
+}
+
+/* the concave corners where the notch meets the screen edge */
+.dev[data-cutout='notch'] .dev-cutout::before,
+.dev[data-cutout='notch'] .dev-cutout::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 11px;
+  height: 11px;
+}
+.dev[data-cutout='notch'] .dev-cutout::before {
+  left: -11px;
+  background: radial-gradient(circle at 0 100%, transparent 11px, #000 11.5px);
+}
+.dev[data-cutout='notch'] .dev-cutout::after {
+  right: -11px;
+  background: radial-gradient(circle at 100% 100%, transparent 11px, #000 11.5px);
+}
+
+.dev[data-cutout='island'] .dev-cutout {
+  top: var(--ct);
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--cw);
+  height: var(--ch);
+  border-radius: 999px;
+  box-shadow: 0 0 0 .5px rgba(255, 255, 255, .06);
+}
+
+/* Face ID dot + the lens speck, the details that read as "Dynamic Island" */
+.dev[data-cutout='island'] .dev-cutout::after {
+  content: '';
+  position: absolute;
+  right: calc(var(--ch) * .30);
+  top: 50%;
+  width: calc(var(--ch) * .30);
+  height: calc(var(--ch) * .30);
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #2a3550 0%, #0b0f1a 55%, #000 100%);
+  box-shadow: inset 0 0 1px rgba(120, 160, 255, .5);
+}
+
+.dev[data-cutout='hole'] .dev-cutout,
+.dev[data-cutout='hole-left'] .dev-cutout {
+  top: var(--ct);
+  width: var(--cw);
+  height: var(--ch);
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #1b2438 0%, #05070c 60%, #000 100%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .07);
+}
+.dev[data-cutout='hole'] .dev-cutout { left: 50%; transform: translateX(-50%); }
+.dev[data-cutout='hole-left'] .dev-cutout { left: 18px; }
+
+.dev[data-cutout='teardrop'] .dev-cutout {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--cw);
+  height: var(--ch);
+  border-radius: 0 0 999px 999px;
+}
+
+.dev[data-cutout='mac-notch'] .dev-cutout {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--cw);
+  height: var(--ch);
+  border-radius: 0 0 8px 8px;
+}
+
+/* landscape moves the cutout to the left edge, the way iOS does */
+.dev[data-orient='landscape'][data-cutout='notch'] .dev-cutout,
+.dev[data-orient='landscape'][data-cutout='island'] .dev-cutout {
+  top: 50%;
+  left: var(--ct, 0px);
+  width: var(--ch);
+  height: var(--cw);
+  transform: translateY(-50%);
+  border-radius: 0 999px 999px 0;
+}
+.dev[data-orient='landscape'][data-cutout='notch'] .dev-cutout::before,
+.dev[data-orient='landscape'][data-cutout='notch'] .dev-cutout::after { display: none; }
+.dev[data-orient='landscape'][data-cutout='island'] .dev-cutout {
+  left: var(--ct);
+  border-radius: 999px;
+}
+.dev[data-orient='landscape'][data-cutout='island'] .dev-cutout::after {
+  right: 50%;
+  top: calc(var(--ch) * .30);
+  transform: translateX(50%);
+}
+
+/* ------------------------------------------------------- status bar */
+
+.dev-status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--sb-h, var(--safe-t));
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--sb-pad, 28px) 0 var(--sb-pad-l, var(--sb-pad, 28px));
+  padding-top: var(--sb-shift, 0px);
+  color: var(--sb-fg);
+  font-family: -apple-system, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.dev-status[hidden] { display: none; }
+
+.dev-status .sb-time {
+  font-variant-numeric: tabular-nums;
+  min-width: 54px;
+  text-align: center;
+}
+
+.dev-status .sb-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dev-status svg { display: block; }
+.dev-status svg [fill='currentColor'] { fill: currentColor; }
+
+.dev[data-os='android'] .dev-status {
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Roboto', 'Segoe UI', system-ui, sans-serif;
+  justify-content: space-between;
+}
+.dev[data-os='android'] .dev-status .sb-time {
+  min-width: 0;
+  text-align: left;
+}
+
+/* ------------------------------------------------------- home indicator */
+
+.dev-home {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  width: var(--home-w, 140px);
+  height: 5px;
+  border-radius: 3px;
+  background: var(--sb-fg);
+  opacity: .85;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.dev[data-os='android'] .dev-home {
+  width: var(--home-w, 108px);
+  height: 4px;
+  bottom: 9px;
+  opacity: .7;
+}
+
+/* ------------------------------------------------------- hardware bits */
+
+.dev-btn {
+  position: absolute;
+  z-index: 3;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--metal-2), var(--metal-3) 45%, var(--metal-1));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 1px 2px rgba(0, 0, 0, .4);
+}
+/*
+ * A hardware button protrudes a few points past the body edge whatever the bezel
+ * is. Sizing it from the bezel alone turns the 76pt chin of a home-button iPad
+ * into an antenna, so the thickness is clamped.
+ */
+.dev-btn[data-side='left'],
+.dev-btn[data-side='right']  { width: calc(min(var(--bl), 9px) + 3px); }
+.dev-btn[data-side='top'],
+.dev-btn[data-side='bottom'] { height: calc(min(var(--bt), 9px) + 3px); }
+
+.dev-btn[data-side='left']  { left: calc(min(var(--bl), 9px) * -1 - 2px); border-radius: 3px 0 0 3px; }
+.dev-btn[data-side='right'] { right: calc(min(var(--br), 9px) * -1 - 2px); border-radius: 0 3px 3px 0; }
+.dev-btn[data-side='top']   { top: calc(min(var(--bt), 9px) * -1 - 2px); border-radius: 3px 3px 0 0; }
+.dev-btn[data-side='bottom']{ bottom: calc(min(var(--bb), 9px) * -1 - 2px); border-radius: 0 0 3px 3px; }
+
+/* The Action Button is machined from the same titanium as the frame, just recessed. */
+.dev-btn[data-type='action'] {
+  background: linear-gradient(90deg, var(--metal-2), var(--metal-1) 50%, var(--metal-2));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 1px 3px rgba(0, 0, 0, .55);
+}
+.dev-btn[data-type='camera'] { background: linear-gradient(90deg, var(--metal-2), #dfe3e8 50%, var(--metal-1)); }
+
+.dev-homebtn {
+  position: absolute;
+  left: 50%;
+  bottom: calc((var(--bb) - var(--hb-size, 58px)) / 2);
+  transform: translateX(-50%);
+  width: var(--hb-size, 58px);
+  height: var(--hb-size, 58px);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, #1d1f23, #0a0b0d 70%);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, .16),
+    0 1px 2px rgba(0, 0, 0, .5);
+  z-index: 3;
+}
+
+.dev-speaker {
+  position: absolute;
+  left: 50%;
+  top: calc((var(--bt) - 8px) / 2);
+  transform: translateX(-50%);
+  width: 58px;
+  height: 7px;
+  border-radius: 4px;
+  background: #0b0c0e;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, .9);
+  z-index: 3;
+}
+.dev-speaker::after {
+  content: '';
+  position: absolute;
+  left: -30px;
+  top: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #22304a, #05070c 70%);
+}
+
+/* ------------------------------------------------------- glass sheen */
+
+.dev-glare {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(112deg,
+    rgba(255, 255, 255, .10) 0%,
+    rgba(255, 255, 255, .04) 18%,
+    rgba(255, 255, 255, 0) 38%,
+    rgba(255, 255, 255, 0) 100%);
+  opacity: var(--glare, .5);
+  mix-blend-mode: screen;
+}
+
+/* ------------------------------------------------------- MacBook body */
+
+/*
+ * The lid, and the rounding of the glass inside it.
+ *
+ * The screen radius used to be pinned to 4px here, which threw away the figure each
+ * device carries — a MacBook Pro rounds its display by 14pt and an Air by 12, and at
+ * 4 the corners read as square. The bottom of the lid stays nearly square because
+ * that edge meets the hinge.
+ */
+.dev[data-kind='laptop'] .dev-body {
+  border-radius: var(--body-r) var(--body-r) 5px 5px;
+}
+.dev[data-kind='laptop'] .dev-screen { border-radius: var(--r); }
+
+/*
+ * The Mac menu bar.
+ *
+ * Always present on a Mac, and the reason the notch is never over a web page: the
+ * bar occupies that strip, and a browser window begins below it. Drawn translucent
+ * over a dark lid the way the real one is over a wallpaper.
+ */
+.dev-menubar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--macbar-h, 24px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  box-sizing: border-box;
+  background: rgba(28, 28, 30, .82);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  color: rgba(255, 255, 255, .92);
+  font: 500 12px/1 -apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  z-index: 5;
+  pointer-events: none;
+}
+.dev-menubar .mb-left,
+.dev-menubar .mb-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+}
+.dev-menubar .mb-right { gap: 9px; }
+.dev-menubar b { font-weight: 700; }
+.dev-menubar svg { width: 13px; height: 15px; opacity: .95; }
+.dev-menubar .mb-right svg { width: 24px; height: 12px; }
+/* The lid is not wide enough for every menu on a 13"; let the tail fall off quietly. */
+.dev-menubar .mb-left { overflow: hidden; }
+
+/* The notch sits over the bar, never over the page — see .dev-menubar above. Its
+   size comes from the device's own cutout measurements, further up this file. */
+
+.dev-chin {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--bb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 10px/1 -apple-system, 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: .12em;
+  color: rgba(255, 255, 255, .38);
+  text-transform: uppercase;
+  z-index: 2;
+}
+
+/*
+ * The half you rest your wrists on.
+ *
+ * It used to be a 14-pixel strip, which at any real size was invisible — the frame
+ * read as a monitor with a word printed under it. Seen head-on an open MacBook shows
+ * a shallow wedge, slightly wider than the lid, with the hinge recessed behind it and
+ * a small scoop in the front edge where a finger lifts the screen. Those three things
+ * are what make the silhouette recognisable, so all three are drawn.
+ */
+.dev-base {
+  position: relative;
+  height: 30px;
+  margin: 0 -3.2%;
+  width: 106.4%;
+  border-radius: 2px 2px 11px 11px;
+  background:
+    linear-gradient(180deg,
+      var(--metal-2) 0%,
+      var(--metal-1) 14%,
+      var(--metal-1) 62%,
+      var(--metal-2) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .28),
+    inset 0 -1px 0 rgba(0, 0, 0, .35),
+    0 16px 30px rgba(0, 0, 0, .42);
+}
+
+/* The hinge: a darker band tucked behind the lid, narrower than the base. */
+.dev-base::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 78%;
+  height: 5px;
+  border-radius: 0 0 4px 4px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .55), var(--metal-2));
+}
+
+/* The scoop in the front edge. */
+.dev-base::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -1px;
+  transform: translateX(-50%);
+  width: 13%;
+  height: 9px;
+  border-radius: 0 0 60% 60% / 0 0 100% 100%;
+  background: linear-gradient(180deg, var(--metal-2), rgba(0, 0, 0, .5));
+}
+
+/* ------------------------------------------------------- desktop stand */
+
+.dev-stand {
+  position: relative;
+  margin: 0 auto;
+  width: 22%;
+  height: 78px;
+  background: linear-gradient(90deg, var(--metal-2), var(--metal-1) 40%, var(--metal-3) 55%, var(--metal-2));
+  clip-path: polygon(28% 0, 72% 0, 84% 100%, 16% 100%);
+}
+.dev-stand::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  transform: translateX(-50%);
+  width: 260%;
+  height: 12px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--metal-1), var(--metal-2));
+  box-shadow: 0 14px 26px rgba(0, 0, 0, .42);
+}
+
+/* ------------------------------------------------------- browser chrome */
+
+.dev-chrome {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  font-family: -apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  color: #1c1c1e;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.dev-chrome[data-pos='top'] { top: 0; }
+.dev-chrome[data-pos='bottom'] { bottom: 0; }
+
+.chrome-ios-bottom {
+  background: rgba(249, 249, 249, .94);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-top: .5px solid rgba(0, 0, 0, .16);
+  padding: 8px 14px 0;
+  height: calc(var(--chrome-b) + var(--safe-b));
+}
+.chrome-ios-bottom .url-pill {
+  height: 36px;
+  border-radius: 11px;
+  background: rgba(118, 118, 128, .12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 15px;
+  color: #1c1c1e;
+  padding: 0 12px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.chrome-ios-bottom .url-pill .host { overflow: hidden; text-overflow: ellipsis; }
+.chrome-ios-bottom .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 0;
+  color: #007aff;
+  font-size: 17px;
+}
+
+.chrome-ios-top {
+  background: rgba(249, 249, 249, .94);
+  border-bottom: .5px solid rgba(0, 0, 0, .16);
+  height: calc(var(--safe-t) + var(--chrome-t));
+  padding-top: var(--safe-t);
+  box-sizing: border-box;
+}
+
+.chrome-android-top {
+  background: #f1f3f4;
+  height: calc(var(--safe-t) + var(--chrome-t));
+  padding: calc(var(--safe-t) + 8px) 12px 0;
+  box-sizing: border-box;
+  border-bottom: 1px solid rgba(0, 0, 0, .08);
+}
+.chrome-android-top .url-pill {
+  height: 36px;
+  border-radius: 18px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: #3c4043;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.chrome-ipad-top {
+  background: rgba(246, 246, 248, .96);
+  height: calc(var(--safe-t) + var(--chrome-t));
+  padding-top: var(--safe-t);
+  border-bottom: .5px solid rgba(0, 0, 0, .14);
+  box-sizing: border-box;
+}
+.chrome-ipad-top .tabbar {
+  height: 40px;
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 0 10px;
+}
+.chrome-ipad-top .tab {
+  height: 32px;
+  border-radius: 8px 8px 0 0;
+  background: #fff;
+  min-width: 180px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 12px;
+  color: #3c3c43;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.chrome-ipad-top .toolbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  color: #007aff;
+}
+.chrome-ipad-top .url-pill {
+  flex: 1;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(118, 118, 128, .12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #1c1c1e;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.chrome-mac-top {
+  background: linear-gradient(180deg, #ececed, #e3e3e5);
+  height: calc(var(--chrome-t) + var(--menu-h, 0px));
+  box-sizing: border-box;
+  border-bottom: 1px solid rgba(0, 0, 0, .14);
+}
+.chrome-mac-top .menubar {
+  height: var(--menu-h, 24px);
+  background: rgba(246, 246, 248, .82);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: #1c1c1e;
+  border-bottom: 1px solid rgba(0, 0, 0, .08);
+}
+.chrome-mac-top .menubar .spacer { flex: 1; }
+.chrome-mac-top .lights { display: flex; gap: 8px; padding: 12px 14px 0; }
+.chrome-mac-top .lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: block;
+}
+.chrome-mac-top .lights i:nth-child(1) { background: #ff5f57; }
+.chrome-mac-top .lights i:nth-child(2) { background: #febc2e; }
+.chrome-mac-top .lights i:nth-child(3) { background: #28c840; }
+.chrome-mac-top .toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px 10px;
+  color: #6b6b70;
+}
+.chrome-mac-top .url-pill {
+  flex: 1;
+  height: 28px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, .06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #1c1c1e;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- label + errors */
+
+.dev-label {
+  margin-top: 14px;
+  max-width: 280px;
+  text-align: center;
+  font-size: 11.5px;
+  letter-spacing: .02em;
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+}
+.dev-label b {
+  display: inline-block;
+  margin-bottom: 3px;
+  color: var(--vscode-foreground);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+/* Each metric stays on one line; only the gaps between them may break. */
+.dev-label .chunk { white-space: nowrap; }
+.dev-label .dot { opacity: .45; margin: 0 6px; }
+
+.dev-blocked {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 28px;
+  text-align: center;
+  background: #fff;
+  color: #1c1c1e;
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+.dev-blocked h3 { margin: 0; font-size: 16px; }
+.dev-blocked p { margin: 0; font-size: 13px; line-height: 1.5; color: #6b6b70; max-width: 34ch; }
+.dev-blocked button {
+  border: 0;
+  border-radius: 10px;
+  padding: 9px 16px;
+  background: #007aff;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}

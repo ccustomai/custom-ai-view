@@ -1,0 +1,539 @@
+{
+  "name": "custom-ai-view",
+  "displayName": "Custom AI View",
+  "description": "A real browser inside pixel-accurate device frames — iPhone, iPad, Android, MacBook — that an AI agent can drive and see. By Custom AI.",
+  "version": "1.13.0",
+  "publisher": "customai",
+  "author": "Custom AI (https://ccustom.ai)",
+  "homepage": "https://ccustom.ai/view",
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Visualization",
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "custom ai view",
+    "responsive",
+    "iphone",
+    "android",
+    "ipad",
+    "mobile simulator",
+    "browser",
+    "notch",
+    "dynamic island",
+    "viewport"
+  ],
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0b0d12",
+    "theme": "dark"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "customAIView.open",
+        "title": "Open Custom AI View",
+        "category": "Custom AI View",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "customAIView.openUrl",
+        "title": "Open URL in Custom AI View…",
+        "category": "Custom AI View",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "customAIView.openLocalhost",
+        "title": "Preview Local Dev Server…",
+        "category": "Custom AI View",
+        "icon": "$(server-environment)"
+      },
+      {
+        "command": "customAIView.openFile",
+        "title": "Preview in Device Frame",
+        "category": "Custom AI View",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "customAIView.pickDevice",
+        "title": "Select Device…",
+        "category": "Custom AI View",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "customAIView.rotate",
+        "title": "Rotate Device",
+        "category": "Custom AI View",
+        "icon": "$(screen-normal)"
+      },
+      {
+        "command": "customAIView.reload",
+        "title": "Reload Page",
+        "category": "Custom AI View",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "customAIView.reloadHard",
+        "title": "Hard Reload (bypass cache)",
+        "category": "Custom AI View",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "customAIView.reloadPurge",
+        "title": "Clear Cache and Reload",
+        "category": "Custom AI View",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "customAIView.openUri",
+        "title": "Open Link in Custom AI View",
+        "category": "Custom AI View"
+      },
+      {
+        "command": "customAIView.screenshot",
+        "title": "Screenshot the Device",
+        "category": "Custom AI View",
+        "icon": "$(device-camera)"
+      },
+      {
+        "command": "customAIView.screenshotFull",
+        "title": "Screenshot the Full Page",
+        "category": "Custom AI View",
+        "icon": "$(device-camera)"
+      },
+      {
+        "command": "customAIView.record",
+        "title": "Record the Device (GIF)",
+        "category": "Custom AI View",
+        "icon": "$(record)"
+      },
+      {
+        "command": "customAIView.toggleInspect",
+        "title": "Toggle Element Inspector",
+        "category": "Custom AI View",
+        "icon": "$(inspect)"
+      },
+      {
+        "command": "customAIView.copyElement",
+        "title": "Copy Selected Element for Claude",
+        "category": "Custom AI View",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "customAIView.mcpCommand",
+        "title": "Show MCP Server Setup",
+        "category": "Custom AI View",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "customAIView.nextDevice",
+        "title": "Next Device",
+        "category": "Custom AI View",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "customAIView.prevDevice",
+        "title": "Previous Device",
+        "category": "Custom AI View",
+        "icon": "$(arrow-left)"
+      },
+      {
+        "command": "customAIView.toggleTouch",
+        "title": "Toggle Touch Emulation",
+        "category": "Custom AI View",
+        "icon": "$(inspect)"
+      },
+      {
+        "command": "customAIView.toggleGrid",
+        "title": "Toggle Multi-Device Wall",
+        "category": "Custom AI View",
+        "icon": "$(layout-panel)"
+      },
+      {
+        "command": "customAIView.openExternal",
+        "title": "Open Current Page in Browser",
+        "category": "Custom AI View",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "customAIView.copyUrl",
+        "title": "Copy Current URL",
+        "category": "Custom AI View",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "customAIView.showProxyLog",
+        "title": "Show Proxy Log",
+        "category": "Custom AI View",
+        "icon": "$(output)"
+      },
+      {
+        "command": "customAIView.selectDevice",
+        "title": "Use This Device",
+        "category": "Custom AI View"
+      },
+      {
+        "command": "customAIView.refreshDevices",
+        "title": "Refresh Device List",
+        "category": "Custom AI View",
+        "icon": "$(refresh)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "customAIViewContainer",
+          "title": "Custom AI View",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "customAIViewContainer": [
+        {
+          "id": "customAIView.devices",
+          "name": "Devices",
+          "icon": "media/activity.svg",
+          "contextualTitle": "Custom AI View"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "customAIView.open",
+          "when": "view == customAIView.devices",
+          "group": "navigation@1"
+        },
+        {
+          "command": "customAIView.openUrl",
+          "when": "view == customAIView.devices",
+          "group": "navigation@2"
+        },
+        {
+          "command": "customAIView.openLocalhost",
+          "when": "view == customAIView.devices",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "customAIView.selectDevice",
+          "when": "view == customAIView.devices && viewItem == device",
+          "group": "inline"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "customAIView.openFile",
+          "when": "resourceExtname == .html || resourceExtname == .htm",
+          "group": "navigation@100"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "customAIView.openFile",
+          "when": "resourceExtname == .html || resourceExtname == .htm",
+          "group": "navigation@30"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "customAIView.selectDevice",
+          "when": "false"
+        },
+        {
+          "command": "customAIView.refreshDevices",
+          "when": "false"
+        },
+        {
+          "command": "customAIView.openUri",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "customAIView.open",
+        "key": "ctrl+alt+shift+d",
+        "mac": "cmd+alt+shift+d"
+      },
+      {
+        "command": "customAIView.rotate",
+        "key": "ctrl+alt+shift+r",
+        "mac": "cmd+alt+shift+r",
+        "when": "customAIView.focused"
+      },
+      {
+        "command": "customAIView.reload",
+        "key": "ctrl+alt+shift+l",
+        "mac": "cmd+alt+shift+l",
+        "when": "customAIView.focused"
+      },
+      {
+        "command": "customAIView.reloadHard",
+        "key": "ctrl+alt+shift+k",
+        "mac": "cmd+alt+shift+k",
+        "when": "customAIView.focused"
+      }
+    ],
+    "configuration": {
+      "title": "Custom AI View",
+      "properties": {
+        "customAIView.defaultDevice": {
+          "type": "string",
+          "default": "iphone-16-pro",
+          "markdownDescription": "Device shown when the preview opens. Use **Custom AI View: Select Device…** to see every id."
+        },
+        "customAIView.startUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "URL loaded when the preview opens with no target. Leave empty to show the built-in start page."
+        },
+        "customAIView.clock": {
+          "type": "string",
+          "enum": [
+            "real",
+            "apple",
+            "custom"
+          ],
+          "enumDescriptions": [
+            "Live system clock, updates every second",
+            "Always 9:41 — the time Apple uses in every keynote and screenshot",
+            "Fixed text from customAIView.customClock"
+          ],
+          "default": "real",
+          "description": "What the status-bar clock shows."
+        },
+        "customAIView.customClock": {
+          "type": "string",
+          "default": "9:41",
+          "description": "Clock text used when customAIView.clock is \"custom\"."
+        },
+        "customAIView.statusBarStyle": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "dark",
+            "light",
+            "hidden"
+          ],
+          "enumDescriptions": [
+            "Follow the page: dark glyphs on a light page, light glyphs on a dark one",
+            "Dark glyphs — for pages with a light background",
+            "Light glyphs — for pages with a dark background",
+            "No status bar at all"
+          ],
+          "default": "auto",
+          "description": "Colour of the simulated status bar glyphs."
+        },
+        "customAIView.statusBarLayout": {
+          "type": "string",
+          "enum": [
+            "inset",
+            "overlay"
+          ],
+          "enumDescriptions": [
+            "The page starts below the status bar, the way a normal mobile page does",
+            "The page runs edge to edge under the status bar, like a full-screen app with viewport-fit=cover"
+          ],
+          "default": "inset",
+          "description": "Where the page begins relative to the status bar."
+        },
+        "customAIView.browserChrome": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Draw the real browser UI (Safari on iOS/iPadOS/macOS, Chrome on Android) and shrink the viewport accordingly. Off = full-screen web-app viewport."
+        },
+        "customAIView.deviceFinish": {
+          "type": "string",
+          "enum": [
+            "graphite",
+            "black",
+            "silver",
+            "gold",
+            "desert",
+            "blue"
+          ],
+          "default": "graphite",
+          "description": "Body colour of the device frame."
+        },
+        "customAIView.background": {
+          "type": "string",
+          "enum": [
+            "studio",
+            "dark",
+            "light",
+            "grid",
+            "editor"
+          ],
+          "default": "studio",
+          "description": "Backdrop behind the device."
+        },
+        "customAIView.shadow": {
+          "type": "boolean",
+          "default": true,
+          "description": "Cast a soft shadow under the device."
+        },
+        "customAIView.showLabel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the device name and viewport size under the frame."
+        },
+        "customAIView.zoom": {
+          "type": "string",
+          "default": "fit",
+          "markdownDescription": "Initial zoom: `fit` to scale into the panel, or a percentage such as `100`, `75`, `50`."
+        },
+        "customAIView.touchEmulation": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Route through the local proxy only when the site blocks framing",
+            "Always route through the local proxy: touch events, mobile User-Agent, drag-to-scroll, hidden scrollbars",
+            "Never use the proxy — plain iframe, desktop User-Agent"
+          ],
+          "default": "always",
+          "markdownDescription": "Touch emulation and framing-block bypass need a local proxy on 127.0.0.1. `always` is the default because it is also what makes the address bar follow the page and what makes hard reload work. See the README for what the proxy can and cannot do."
+        },
+        "customAIView.linkHandling": {
+          "type": "string",
+          "enum": [
+            "always",
+            "ask",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Links clicked elsewhere in VS Code open in Custom AI View",
+            "Offer Custom AI View alongside the system browser",
+            "Never touch links outside the preview"
+          ],
+          "default": "always",
+          "markdownDescription": "Where http/https links clicked elsewhere in VS Code open. Terminal links and Ctrl+click in an editor always work; whether Custom AI View can take over *every* link depends on the VS Code build, since that hook is not a stable API."
+        },
+        "customAIView.openOnActivityBarClick": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the preview immediately when you click the logo in the activity bar."
+        },
+        "customAIView.screenCalibration": {
+          "type": "number",
+          "default": 1,
+          "markdownDescription": "Correction factor for the physical size of your monitor, used by the **Actual size 1:1** zoom. The monitor reports its size rounded to whole centimetres, so this trims the last percent. Set it from the zoom menu by matching a bank card."
+        },
+        "customAIView.pointerStyle": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "finger",
+            "dot",
+            "arrow"
+          ],
+          "enumDescriptions": [
+            "A fingertip over phones and tablets, the normal arrow over Macs and displays",
+            "Always a fingertip — a circle the size of a real contact patch",
+            "Always a small dot",
+            "Always the system arrow"
+          ],
+          "default": "auto",
+          "markdownDescription": "What the cursor looks like over the device. An arrow lies about touch: it says a tap lands on one pixel, when a real fingertip covers about 11 mm and can hit the control next door."
+        },
+        "customAIView.chromePath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to Chrome or Edge, used to take screenshots and recordings. Empty auto-detects. A webview cannot photograph its own cross-origin frame, so captures are rendered by a headless browser instead."
+        },
+        "customAIView.captureDirectory": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Where material is filed. Empty means **Desktop → Custom AI View**. Under it every site gets its own folder — `ccustom.ai`, `localhost-5173` — holding `screenshots/`, `recordings/`, `logs/` and `code/`, so a shot taken last week is still findable."
+        },
+        "customAIView.controlApi": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run the local control API that lets the Custom AI View MCP server drive the browser, take screenshots and read elements. Bound to 127.0.0.1 and protected by a per-session token."
+        },
+        "customAIView.controlPort": {
+          "type": "number",
+          "default": 0,
+          "description": "Fixed port for the control API. 0 picks a free port."
+        },
+        "customAIView.proxyPort": {
+          "type": "number",
+          "default": 0,
+          "description": "Fixed port for the local proxy. 0 picks a free port automatically."
+        },
+        "customAIView.userAgent.ios": {
+          "type": "string",
+          "default": "",
+          "description": "Override the iOS User-Agent sent upstream by the proxy. Empty uses the built-in current Safari string."
+        },
+        "customAIView.userAgent.android": {
+          "type": "string",
+          "default": "",
+          "description": "Override the Android User-Agent sent upstream by the proxy."
+        },
+        "customAIView.gridDevices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "iphone-se-3",
+            "iphone-16-pro",
+            "galaxy-s24",
+            "ipad-pro-11-m4"
+          ],
+          "description": "Devices shown side by side in the multi-device wall."
+        },
+        "customAIView.openInColumn": {
+          "type": "string",
+          "enum": [
+            "beside",
+            "active"
+          ],
+          "default": "beside",
+          "description": "Where the preview tab opens."
+        },
+        "customAIView.retainContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the page alive when the tab is hidden. Uses more memory but never reloads on tab switch."
+        },
+        "customAIView.forceMobileViewport": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Inject `<meta name=viewport content=width=device-width>` into pages that lack one. Off = faithful emulation, where such pages lay out at 980px and scale down, exactly like real mobile Safari."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "npx --yes @vscode/vsce package --no-dependencies",
+    "icon": "node scripts/make-icon.js",
+    "exe": "node scripts/build-exe.js",
+    "launcher": "node scripts/make-launcher.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/customai/custom-ai-view"
+  }
+}

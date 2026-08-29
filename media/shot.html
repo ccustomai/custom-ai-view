@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Custom AI View capture</title>
+<link rel="stylesheet" href="frames.css">
+<style>
+  /* The capture page exists only to be photographed, so it carries no chrome of
+     its own — just the device on a transparent ground the capture can clip to. */
+  :root {
+    --vscode-foreground: #e6e8ec;
+    --vscode-descriptionForeground: #9aa0aa;
+    --vscode-font-family: 'Segoe UI', system-ui, sans-serif;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-family: var(--vscode-font-family);
+  }
+  #stage {
+    display: inline-block;
+    padding: var(--pad, 0px);
+  }
+  body[data-bg='studio'] {
+    background:
+      radial-gradient(1200px 700px at 50% -10%, rgba(120, 140, 190, .18), transparent 60%),
+      linear-gradient(180deg, #14161c 0%, #0c0d11 100%);
+  }
+  body[data-bg='light'] { background: #eceef2; }
+  body[data-bg='dark'] { background: #0b0c0f; }
+</style>
+</head>
+<body>
+  <div id="stage"></div>
+  <script src="devices.js"></script>
+  <script src="frame.js"></script>
+  <script src="shot.js"></script>
+</body>
+</html>
