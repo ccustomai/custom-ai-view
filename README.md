@@ -59,6 +59,15 @@ side.
 No dependencies; it needs Chrome or Edge installed. To put the branded shortcut on
 your desktop: `node scripts/make-launcher.js`.
 
+**Mac app** — download `CustomAIView-macos-arm64.zip` (Apple silicon) or
+`-x64.zip` (Intel) from the same page, unzip it into `/Applications` and open it.
+It needs Chrome or Edge installed. The bundle is signed ad-hoc rather than notarised,
+so the first launch is right-click → **Open** — or, once:
+
+```
+xattr -dr com.apple.quarantine "/Applications/Custom AI View.app"
+```
+
 **VS Code extension** — download the `.vsix` from Releases and
 `code --install-extension custom-ai-view-<version>.vsix`, then reload the window.
 
@@ -80,13 +89,15 @@ an agent never has to ask a human to open something first.
 ## Build from source
 
 ```
-node scripts/build-exe.js       # dist/CustomAIView.exe  (Node SEA, ~82 MB)
-node scripts/make-launcher.js   # desktop shortcut with the icon
+node scripts/build-exe.js       # dist/CustomAIView(.exe)  (Node SEA, ~82 MB)
+node scripts/build-mac-app.js   # dist/Custom AI View.app + a zip   (macOS only)
+node scripts/make-launcher.js   # desktop shortcut with the icon    (Windows only)
 npm run package                 # the .vsix
 ```
 
-macOS and Linux build the same way; the launcher and browser registration are Windows
-only.
+The single executable is a copy of the node binary it was built with, so a Mac build
+needs a Mac. `.github/workflows/release.yml` builds all three on a tag — Apple
+silicon, Intel and Windows — and attaches them to the release.
 
 ![MacBook Pro frame with the macOS menu bar](docs/macbook.png)
 

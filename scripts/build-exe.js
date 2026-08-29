@@ -30,7 +30,9 @@ const BUILD = path.join(ROOT, 'build');
 const DIST = path.join(ROOT, 'dist');
 const pkg = require(path.join(ROOT, 'package.json'));
 
-const EXE_NAME = 'CustomAIView.exe';
+// `.exe` is a Windows convention. Elsewhere the extension is noise, and on macOS a
+// name ending in .exe inside an .app bundle stops it being the bundle executable.
+const EXE_NAME = process.platform === 'win32' ? 'CustomAIView.exe' : 'CustomAIView';
 
 /** Everything the running app opens by path rather than by require(). */
 const RESOURCES = [
@@ -204,11 +206,37 @@ if (process.platform === 'win32') {
   }
 }
 
+/*
+ * macOS ships node signed, and injecting a section invalidates that signature —
+ * the result is killed on launch with SIGKILL and no message anyone can act on.
+ * The signature is therefore removed before the injection and an ad-hoc one is
+ * applied after. Ad-hoc is enough to run; distributing it outside the Mac App
+ * Store still wants a Developer ID signature and notarisation, which needs an
+ * Apple account rather than a build step.
+ *
+ * Mach-O also has no spare section to write into, so the blob goes in a segment
+ * of its own — which is what --macho-segment-name names.
+ */
+const mac = process.platform === 'darwin';
+if (mac) {
+  try {
+    execFileSync('codesign', ['--remove-signature', exe], { stdio: 'pipe' });
+    log('  signature removed before injection');
+  } catch {
+    /* an unsigned node is fine — there is nothing to remove */
+  }
+}
+
 npx([
   '--yes', 'postject@1.0.0-alpha.6',
   exe, 'NODE_SEA_BLOB', path.join(BUILD, 'sea-prep.blob'),
   '--sentinel-fuse', 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2',
-]);
+].concat(mac ? ['--macho-segment-name', 'NODE_SEA'] : []));
+
+if (mac) {
+  execFileSync('codesign', ['--sign', '-', exe], { stdio: 'inherit' });
+  log('  re-signed ad-hoc');
+}
 
 // A build interrupted between copying node.exe and injecting the blob leaves a
 // plain node binary that treats its first argument as a script path. Prove the

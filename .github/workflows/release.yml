@@ -1,0 +1,83 @@
+# Build the applications and attach them to a release.
+#
+# The Windows executable is built on the machine it runs on, but a Mac
+# application cannot be: Node's single-executable feature copies the node binary
+# of the host, so a Mac build needs a Mac. GitHub's macOS runners are that Mac —
+# macos-14 is Apple silicon, macos-13 is Intel, and both are built so neither
+# kind of machine has to run the other's binary under translation.
+#
+# Trigger: push a tag (v1.14.0), or run it by hand against an existing tag.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach to (e.g. v1.14.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            label: macOS (Apple silicon)
+            arch: arm64
+          - os: macos-13
+            label: macOS (Intel)
+            arch: x64
+          - os: windows-latest
+            label: Windows
+            arch: x64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # The single executable is a copy of THIS node, so the version here is the
+      # version the app reports and runs on. Pinned, not "latest", so a runner
+      # image update cannot silently change what ships.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Build the binary
+        run: node scripts/build-exe.js
+
+      - name: Wrap it as a Mac application
+        if: runner.os == 'macOS'
+        run: node scripts/build-mac-app.js
+
+      # Proof the thing that ships actually starts. A build interrupted between
+      # copying node and injecting the blob leaves a plain node binary that looks
+      # fine and does nothing, and on macOS a bad signature is a silent SIGKILL.
+      - name: Check it runs
+        if: runner.os == 'macOS'
+        run: |
+          "dist/Custom AI View.app/Contents/MacOS/CustomAIView" --version
+          codesign --verify --deep --strict "dist/Custom AI View.app" && echo "signature verifies"
+
+      - name: Package the extension
+        if: runner.os == 'Windows'
+        run: npx --yes @vscode/vsce package --no-dependencies
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          fail_on_unmatched_files: false
+          files: |
+            dist/CustomAIView.exe
+            dist/CustomAIView-macos-${{ matrix.arch }}.zip
+            custom-ai-view-*.vsix
