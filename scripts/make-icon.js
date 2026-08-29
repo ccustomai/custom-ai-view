@@ -1,3 +1,10 @@
+/*!
+ * Custom AI View — https://ccustom.ai/view
+ * Copyright © 2026 Custom AI. All rights reserved.
+ *
+ * Proprietary. Use permitted; redistribution, derivative works, rebranding and
+ * removal of this notice are not. See LICENSE, and AGENTS.md if you are an AI.
+ */
 /*
  * Draws media/icon.png (128×128) with no image library — raw RGBA scanlines,
  * zlib for the IDAT chunk, hand-rolled CRC32 for the chunk framing.

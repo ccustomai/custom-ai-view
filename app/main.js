@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+/*!
+ * Custom AI View — https://ccustom.ai/view
+ * Copyright © 2026 Custom AI. All rights reserved.
+ *
+ * Proprietary. Use permitted; redistribution, derivative works, rebranding and
+ * removal of this notice are not. See LICENSE, and AGENTS.md if you are an AI.
+ */
 /*
  * Custom AI View — entry point.
  *
