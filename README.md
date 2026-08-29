@@ -107,14 +107,24 @@ The single executable is a copy of the node binary it was built with, so a Mac b
 needs a Mac. `.github/workflows/release.yml` builds all three on a tag — Apple
 silicon, Intel and Windows — and attaches them to the release.
 
-![MacBook Pro frame with the macOS menu bar](docs/macbook.png)
+![MacBook Pro 14-inch frame: black glass, the notch cut into the macOS menu bar, and the deck below the lid](docs/macbook.png)
+
+A MacBook lid is one sheet of black glass with a hairline of anodised edge, its chin
+three times its forehead, and its notch cut **into** the menu bar — where a browser
+window never reaches, so it is never a black rectangle over your site.
 
 ## What it looks like
 
+![The start page, listing the dev servers found on this machine](docs/start-page.png)
+
+Dev servers are not guessed from a list of usual ports. The app asks the operating
+system what is listening, then asks each port whether it serves pages — and shows the
+site's own title and icon. The one on 8899 above is on no list of usual ports.
+
 | | |
 |---|---|
-| ![Start page](docs/start-page.png) | ![Light theme](docs/light-theme.png) |
-| Dev servers are found by asking the OS what is listening, then asking each one whether it serves pages — with its title and icon | Light, dark, or follow the system |
+| ![iPhone 16 Pro frame showing a live site](docs/iphone.png) | ![iPad Pro 11-inch frame showing the same site](docs/ipad.png) |
+| iPhone 16 Pro — 402 × 874 pt, @3x, 67 × 145 mm, safe area 62/34 | iPad Pro 11" (M4) — the same engine, the same proxy, the same session |
 
 ## Notable details
 
