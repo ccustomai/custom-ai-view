@@ -46,7 +46,15 @@ custom_ai_view_edit        change the live page; survives reload; revert undoes 
 custom_ai_view_console     page output *and* the browser's own messages, with ages
 custom_ai_view_back        go back without losing SPA state
 custom_ai_view_record      screen recording with no fixed length
+custom_ai_view_record_clip a clip of fixed length, when the length is known
 custom_ai_view_collect     screenshot + markup + console + selection, in one folder
+custom_ai_view_state       what is open now: address, device, viewport, selection
+custom_ai_view_set_device  change the device without losing the page
+custom_ai_view_devices     the catalogue, with points, pixels and millimetres
+custom_ai_view_reload      normal, hard, or clearing the cache first
+custom_ai_view_edits       every live edit currently in force
+custom_ai_view_revert      put one of them back, or all of them
+custom_ai_view_library     what has been captured, filed by site
 ```
 
 Every tool takes a `window` argument, so a phone and an iPad can be driven side by
