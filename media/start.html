@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Custom AI View</title>
+<link rel="stylesheet" href="start.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="hero">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 44 44" width="44" height="44" fill="none">
+          <rect x="12" y="3" width="20" height="38" rx="5" stroke="currentColor" stroke-width="2.2"/>
+          <rect x="17.5" y="6.4" width="9" height="2.6" rx="1.3" fill="currentColor"/>
+          <path d="M18 36.6h8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h1>Custom AI View</h1>
+      <p id="deviceLine">Pick a URL to see it on a real device frame.</p>
+    </header>
+
+    <form class="field" id="urlForm">
+      <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+             placeholder="localhost:5173, example.com, or 3000">
+      <button type="submit" aria-label="Open">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 8h9M8.5 4l4 4-4 4"/>
+        </svg>
+      </button>
+    </form>
+
+    <section class="card" id="serversCard" hidden>
+      <h2>Local dev servers</h2>
+      <div class="rows" id="servers"></div>
+    </section>
+
+    <section class="card" id="recentCard" hidden>
+      <h2>Recent</h2>
+      <div class="rows" id="recent"></div>
+    </section>
+
+    <section class="card">
+      <h2>Shortcuts</h2>
+      <div class="rows plain">
+        <div class="kv"><span>Rotate</span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>R</kbd></div>
+        <div class="kv"><span>Pick device</span><kbd>Ctrl</kbd><kbd>D</kbd></div>
+        <div class="kv"><span>Address bar</span><kbd>Ctrl</kbd><kbd>L</kbd></div>
+        <div class="kv"><span>Zoom</span><kbd>Ctrl</kbd><span class="plus">+</span><kbd>scroll</kbd></div>
+      </div>
+    </section>
+
+    <footer>
+      <p>The <b>touch</b> badge means the page is routed through the local proxy —
+         real touch events, a mobile User-Agent and drag-to-scroll.</p>
+    </footer>
+  </main>
+  <script src="start.js"></script>
+</body>
+</html>

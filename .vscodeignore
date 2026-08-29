@@ -1,0 +1,11 @@
+.vscode/**
+.github/**
+scripts/**
+build/**
+dist/**
+node_modules/**
+*.vsix
+.gitignore
+.eslintrc*
+**/*.map
+**/.DS_Store

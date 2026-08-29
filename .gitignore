@@ -1,0 +1,18 @@
+# Build output. The executable is 82 MB — it ships as a release asset, not in the tree.
+dist/
+build/
+
+# Packaged extension; also a release asset.
+*.vsix
+
+node_modules/
+
+# Anything the app writes about this particular machine.
+.custom-ai-view/
+*.log
+
+# Editor and OS litter
+.DS_Store
+Thumbs.db
+.idea/
+*.swp

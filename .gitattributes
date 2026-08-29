@@ -1,0 +1,7 @@
+# One line ending in the repository, whatever the machine that committed used.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.vsix binary
+*.exe binary

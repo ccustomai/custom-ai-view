@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__APP_NAME__</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/media/ui.css">
+<link rel="stylesheet" href="/media/frames.css">
+<style>
+  /*
+   * The panel UI is written against VS Code's theme variables. Standing alone, it
+   * needs those variables defined; these are VS Code's own Dark Modern values, so
+   * the app looks like the editor it came from.
+   */
+  :root {
+    --vscode-font-family: 'Segoe UI', -apple-system, system-ui, sans-serif;
+    --vscode-foreground: #cccccc;
+    --vscode-descriptionForeground: #9d9d9d;
+    --vscode-editor-background: #1f1f1f;
+    --vscode-editorGroupHeader-tabsBackground: #181818;
+    --vscode-editorWidget-background: #202020;
+    --vscode-panel-border: #2b2b2b;
+    --vscode-input-background: #313131;
+    --vscode-input-foreground: #cccccc;
+    --vscode-input-border: #3c3c3c;
+    --vscode-focusBorder: #0078d4;
+    --vscode-badge-background: #616161;
+    --vscode-badge-foreground: #f8f8f8;
+    --vscode-toolbar-hoverBackground: #383838;
+    --vscode-toolbar-activeBackground: #454545;
+    --vscode-menu-background: #1f1f1f;
+    --vscode-menu-foreground: #cccccc;
+    --vscode-menu-border: #454545;
+    --vscode-list-hoverBackground: #2a2d2e;
+    --vscode-list-activeSelectionBackground: #04395e;
+    --vscode-list-activeSelectionForeground: #ffffff;
+    --vscode-dropdown-background: #313131;
+    --vscode-dropdown-foreground: #cccccc;
+    --vscode-dropdown-border: #3c3c3c;
+    --vscode-button-background: #0078d4;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-hoverBackground: #026ec1;
+    --vscode-notifications-background: #1f1f1f;
+    --vscode-notifications-foreground: #cccccc;
+    --vscode-notificationCenter-border: #454545;
+    --vscode-inputOption-activeBackground: rgba(0, 120, 212, .4);
+    --vscode-inputOption-activeForeground: #ffffff;
+    --vscode-charts-blue: #4daafc;
+    --vscode-charts-red: #f14c4c;
+    --vscode-charts-green: #89d185;
+    --vscode-charts-orange: #d18616;
+    --vscode-charts-yellow: #cca700;
+    --vscode-charts-purple: #b180d7;
+    --vscode-scrollbarSlider-background: #79797966;
+    --vscode-scrollbarSlider-hoverBackground: #646464b3;
+    color-scheme: dark;
+  }
+
+  /*
+   * The same panel in daylight. These are VS Code's Light Modern values, so the two
+   * themes are not a dark one and an inverted guess at it — a light interface needs
+   * its own contrasts, and the syntax colours especially: what reads on #1f1f1f is
+   * unreadable on white.
+   */
+  :root[data-theme='light'] {
+    --vscode-foreground: #3b3b3b;
+    --vscode-descriptionForeground: #6a6a6a;
+    --vscode-editor-background: #ffffff;
+    --vscode-editorGroupHeader-tabsBackground: #f8f8f8;
+    --vscode-editorWidget-background: #f3f3f3;
+    --vscode-panel-border: #e5e5e5;
+    --vscode-input-background: #ffffff;
+    --vscode-input-foreground: #3b3b3b;
+    --vscode-input-border: #cecece;
+    --vscode-focusBorder: #005fb8;
+    --vscode-badge-background: #cccccc;
+    --vscode-badge-foreground: #3b3b3b;
+    --vscode-toolbar-hoverBackground: #e8e8e8;
+    --vscode-toolbar-activeBackground: #dcdcdc;
+    --vscode-menu-background: #ffffff;
+    --vscode-menu-foreground: #3b3b3b;
+    --vscode-menu-border: #cecece;
+    --vscode-list-hoverBackground: #f0f0f0;
+    --vscode-list-activeSelectionBackground: #0060c0;
+    --vscode-list-activeSelectionForeground: #ffffff;
+    --vscode-dropdown-background: #ffffff;
+    --vscode-dropdown-foreground: #3b3b3b;
+    --vscode-dropdown-border: #cecece;
+    --vscode-button-background: #005fb8;
+    --vscode-button-foreground: #ffffff;
+    --vscode-button-hoverBackground: #0258a8;
+    --vscode-notifications-background: #ffffff;
+    --vscode-notifications-foreground: #3b3b3b;
+    --vscode-notificationCenter-border: #cecece;
+    --vscode-inputOption-activeBackground: rgba(0, 95, 184, .2);
+    --vscode-inputOption-activeForeground: #000000;
+    --vscode-charts-blue: #0066bf;
+    --vscode-charts-red: #cd3131;
+    --vscode-charts-green: #26794c;
+    --vscode-charts-orange: #a5540a;
+    --vscode-charts-yellow: #b5891f;
+    --vscode-charts-purple: #652d90;
+    --vscode-scrollbarSlider-background: #64646466;
+    --vscode-scrollbarSlider-hoverBackground: #646464b3;
+    color-scheme: light;
+  }
+  html, body { background: var(--vscode-editor-background); }
+</style>
+</head>
+<body class="dp-body">
+  <div id="app" class="dp-app">
+    <header class="dp-toolbar" id="toolbar"></header>
+    <section class="dp-carousel" id="carousel" hidden></section>
+    <main class="dp-stage" id="stage" tabindex="0">
+      <div class="dp-stage-inner" id="stageInner"></div>
+    </main>
+    <section class="dp-devtools" id="devtools" hidden></section>
+    <footer class="dp-selection" id="selection" hidden></footer>
+    <div class="dp-popover" id="popover" hidden></div>
+    <div class="dp-toast" id="toast" hidden></div>
+  </div>
+
+  <script>
+    /*
+     * The webview API shim.
+     *
+     * media/main.js is the VS Code panel, unmodified. It expects acquireVsCodeApi(),
+     * messages arriving as window "message" events, and setState/getState. Standing
+     * alone, up-messages go over POST and down-messages arrive on an EventSource,
+     * so the panel code never has to know which host it is running under.
+     */
+    (function () {
+      var SESSION = '__SESSION_ID__';
+      window.__DP_STANDALONE__ = true;
+      window.__DP_SESSION__ = SESSION;
+      window.__DP_ASSETS__ = { start: '/media/start.html' };
+
+      var queue = [];
+      var flushing = false;
+      var streamOpen = false;
+
+      function flush() {
+        // Nothing goes up until the event stream is listening, or the host's reply
+        // to the very first message would be written to nobody.
+        if (!streamOpen || flushing || !queue.length) return;
+        flushing = true;
+        var batch = queue.shift();
+        fetch('/message?id=' + SESSION, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(batch),
+        })
+          .catch(function () { /* the host may be shutting down */ })
+          .then(function () {
+            flushing = false;
+            flush();
+          });
+      }
+
+      window.acquireVsCodeApi = function () {
+        return {
+          postMessage: function (msg) {
+            queue.push(msg);
+            flush();
+          },
+          setState: function (s) {
+            try { localStorage.setItem('dp-state-' + SESSION, JSON.stringify(s)); } catch (e) {}
+          },
+          getState: function () {
+            try { return JSON.parse(localStorage.getItem('dp-state-' + SESSION) || 'null'); } catch (e) { return null; }
+          },
+        };
+      };
+
+      var events = new EventSource('/events?id=' + SESSION);
+      events.onopen = function () {
+        streamOpen = true;
+        flush();
+      };
+      events.onmessage = function (ev) {
+        var msg;
+        try { msg = JSON.parse(ev.data); } catch (e) { return; }
+
+        // Two messages only the standalone host sends.
+        if (msg.type === 'clipboard-text') {
+          if (navigator.clipboard) navigator.clipboard.writeText(msg.text).catch(function () {});
+          return;
+        }
+        if (msg.type === 'command' && msg.name === 'close-window') {
+          window.close();
+          return;
+        }
+        window.postMessage(msg, '*');
+      };
+      events.onerror = function () {
+        // The host went away; nothing useful is left in this window.
+        document.title = '__APP_NAME__ — disconnected';
+      };
+    })();
+  </script>
+  <script src="/src/devices.js"></script>
+  <script src="/media/frame.js"></script>
+  <script src="/media/main.js"></script>
+</body>
+</html>
