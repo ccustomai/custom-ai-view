@@ -36,7 +36,8 @@ custom_ai_view_open        open a URL on a given device
 custom_ai_view_wait        wait for an element, or for loading to finish
 custom_ai_view_screenshot  the live window — and it says so when it is not
 custom_ai_view_find        elements by selector or visible text, with real visibility
-custom_ai_view_click       tap · _type  type, optionally submitting on Enter
+custom_ai_view_click       tap something
+custom_ai_view_type        type into a field, optionally submitting on Enter
 custom_ai_view_key         Enter, Escape, Tab, arrows
 custom_ai_view_scroll      the page, or one scroller inside it
 custom_ai_view_inspect     markup, computed styles, box, ancestry
@@ -54,7 +55,7 @@ side.
 ## Install
 
 **Windows app** — download `CustomAIView.exe` from
-[Releases](https://github.com/amugusus/custom-ai-view/releases), run it, and pin it.
+[Releases](https://github.com/ccustomai/custom-ai-view/releases), run it, and pin it.
 No dependencies; it needs Chrome or Edge installed. To put the branded shortcut on
 your desktop: `node scripts/make-launcher.js`.
 
