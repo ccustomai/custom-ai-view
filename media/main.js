@@ -625,6 +625,14 @@
         showLabel: state.showLabel,
         glare: state.glare,
         touchEmulation: state.touchEmulation,
+        // The host has always been ready to remember these three — they are in
+        // its `remembered` table — but this window never sent them, so all
+        // three were forgotten on every restart. The pointer was the worst of
+        // the three: it applies live, so it looks like it took, and comes back
+        // the next morning as though the choice had never been made.
+        pointerStyle: state.pointerStyle,
+        clock: state.clock,
+        customClock: state.customClock,
         gridDevices: state.gridDevices,
         calibration: state.calibration,
         framedShots: state.framedShots,
@@ -1875,11 +1883,12 @@
         bindSelect('themeMode', function (v) { applyTheme(v); persist(); });
         bindSelect('sbStyle', function (v) { state.statusBar = v; renderStage(); });
         bindSelect('sbLayout', function (v) { state.statusBarLayout = v; renderStage(); });
-        bindSelect('clockMode', function (v) { state.clock = v; renderStage(); });
+        bindSelect('clockMode', function (v) { state.clock = v; renderStage(); persist(); });
         bindSelect('pointerMode', function (v) {
           state.pointerStyle = v;
           // Applied live, so the choice can be judged by moving the mouse.
           sendToFrame({ type: 'dp:cmd:pointer', mode: Catalog.pointerFor(v, Catalog.byId(state.deviceId)) });
+          persist();
         });
         bindSelect('bgMode', function (v) { state.background = v; stageEl.dataset.bg = v; persist(); });
         bindCheck('shadowChk', function (v) { state.shadow = v; renderStage(); });
@@ -2178,6 +2187,9 @@
     if (typeof cfg.shadow === 'boolean') state.shadow = cfg.shadow;
     if (typeof cfg.showLabel === 'boolean') state.showLabel = cfg.showLabel;
     if (cfg.touchEmulation) state.touchEmulation = cfg.touchEmulation;
+    // Read back, or the select shows "Finger on phones" while the frame is
+    // drawing whatever was actually chosen last time.
+    if (cfg.pointerStyle) state.pointerStyle = cfg.pointerStyle;
     // Where material is filed. Known from the start, so the camera menu names the
     // real folder instead of guessing at it.
     if (cfg.libraryRoot) state.libraryRoot = cfg.libraryRoot;
