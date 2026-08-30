@@ -2218,8 +2218,10 @@ function outlineText(outline, device) {
   }
   if (counts.hidden) missing.push(counts.hidden + ' hidden');
   if (counts.shadow) {
-    missing.push(counts.shadow + ' shadow root' + (counts.shadow === 1 ? '' : 's') +
-      ', whose contents no CSS selector can reach');
+    // Open roots are walked now; only closed ones are left out, and a closed
+    // root is unreachable from script by design rather than by oversight.
+    missing.push(counts.shadow + ' closed shadow root' + (counts.shadow === 1 ? '' : 's') +
+      ', which nothing running in the page can see into');
   }
   if (missing.length) lines.push('Not listed: ' + missing.join('; ') + '.');
 
