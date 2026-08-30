@@ -60,6 +60,19 @@ const MIME = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.json': 'application/json; charset=utf-8',
+  // The rest are for files going the other way — handed to a file input on the
+  // page. A form that checks the type rejects application/octet-stream, so the
+  // upload has to arrive labelled as what it is.
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.zip': 'application/zip',
 };
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0']);
@@ -1557,6 +1570,43 @@ class AppHost {
           return { ok: true, direction: 'forward' };
         },
         '/scroll': async body => this.ask(body, { type: 'dp:cmd:input', kind: 'scroll', selector: body.selector, dx: body.dx || 0, dy: body.dy || 0 }, 'dp:input-done'),
+
+        '/hover': async body => this.ask(body, {
+          type: 'dp:cmd:input', kind: 'hover', selector: body.selector,
+        }, 'dp:input-done'),
+
+        '/drag': async body => this.ask(body, {
+          type: 'dp:cmd:input', kind: 'drag', selector: body.selector,
+          dx: body.dx || 0, dy: body.dy || 0, steps: body.steps,
+        }, 'dp:input-done'),
+
+        /*
+         * The bytes are read here, because the page cannot read the disk.
+         *
+         * Bounded at four megabytes each: the channel is postMessage, and the
+         * point of this is an avatar or a document, not a video.
+         */
+        '/upload': async body => {
+          const wanted = Array.isArray(body.files) ? body.files : [body.file];
+          const files = [];
+          for (const p of wanted) {
+            if (!p) continue;
+            const stat = fs.statSync(p);
+            if (stat.size > 4 * 1024 * 1024) {
+              throw new Error(path.basename(p) + ' is ' + (stat.size / 1048576).toFixed(1)
+                + ' MB; the limit is 4 MB');
+            }
+            files.push({
+              name: path.basename(p),
+              base64: fs.readFileSync(p).toString('base64'),
+              type: MIME[path.extname(p).toLowerCase()] || 'application/octet-stream',
+            });
+          }
+          if (!files.length) throw new Error('No file was given.');
+          return this.ask(body, {
+            type: 'dp:cmd:input', kind: 'upload', selector: body.selector, files,
+          }, 'dp:input-done', 20000);
+        },
 
         '/find': async body => this.ask(body, {
           type: 'dp:cmd:find',

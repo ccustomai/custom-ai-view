@@ -537,7 +537,25 @@ const TOOLS = [
     },
     run: async args => {
       const r = await call('/click', args);
-      return { text: 'Tapped ' + (r.name || args.selector) + '.' };
+      /*
+       * Say what was wrong with the tap, at the moment of the tap.
+       *
+       * Both of these were known and thrown away. A click on a button behind an
+       * open modal reported success, and whatever came next waited for
+       * something that was never going to happen. A 24×24 target reported
+       * success too, and the fact that no finger could reliably hit it — the
+       * whole point of a device frame — went unsaid.
+       */
+      const notes = [];
+      if (r.covered) {
+        notes.push('But ' + r.covered + ' is on top of it at that point — on a real screen the tap '
+          + 'would have hit that instead. Check for an open dialog, a banner, or an overlay.');
+      }
+      if (r.small) {
+        notes.push('Its target is ' + r.small + ' px, under the 44 pt a fingertip covers, so on the '
+          + 'real device this tap is a matter of luck.');
+      }
+      return { text: 'Tapped ' + (r.name || args.selector) + '.' + (notes.length ? '\n' + notes.join('\n') : '') };
     },
   },
   {
@@ -648,6 +666,71 @@ const TOOLS = [
     run: async args => {
       await call('/close-window', args);
       return { text: 'Closed window ' + args.window + '.' };
+    },
+  },
+  {
+    name: 'custom_ai_view_hover',
+    description:
+      'Move the pointer onto an element without clicking. A menu that opens on hover, '
+      + 'a tooltip, a row that only reveals its actions when pointed at — none of these can '
+      + 'be reached by clicking, because a click lands on the parent and the thing you wanted '
+      + 'never appears.',
+    inputSchema: {
+      type: 'object',
+      required: ['selector'],
+      properties: { selector: { type: 'string' }, window: WINDOW_ARG },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/hover', args);
+      return { text: 'Hovering ' + (r.name || args.selector) + '.' };
+    },
+  },
+  {
+    name: 'custom_ai_view_drag',
+    description:
+      'Press on an element, move by an offset, and release — which on a phone is a swipe. '
+      + 'Carousels, sliders, pull-up sheets and swipe-to-delete rows all need this; none of '
+      + 'them answer to a click. The path is walked in steps rather than jumped, because a '
+      + 'single leap reads as a flick to some libraries and as nothing at all to others.',
+    inputSchema: {
+      type: 'object',
+      required: ['selector'],
+      properties: {
+        selector: { type: 'string', description: 'What to press on.' },
+        dx: { type: 'number', description: 'Horizontal distance in CSS pixels. Negative goes left.' },
+        dy: { type: 'number', description: 'Vertical distance. Negative goes up.' },
+        steps: { type: 'number', description: 'Intermediate moves, 4 to 24. Default 10.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/drag', args);
+      return { text: (r.name || 'Dragged.') };
+    },
+  },
+  {
+    name: 'custom_ai_view_upload',
+    description:
+      'Give a file to a file input on the page. Every upload flow — an avatar, a document, '
+      + 'an import — is otherwise unreachable: the native picker cannot be driven from script, '
+      + 'and clicking the input only opens it. Pass a path on this machine; the file is read '
+      + 'here and handed to the page as though a person had chosen it. Up to 4 MB each.',
+    inputSchema: {
+      type: 'object',
+      required: ['selector'],
+      properties: {
+        selector: { type: 'string', description: 'The file input, e.g. "input[type=file]".' },
+        file: { type: 'string', description: 'An absolute path on this machine.' },
+        files: { type: 'array', items: { type: 'string' }, description: 'Several paths, for a multiple input.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/upload', args);
+      return { text: 'Uploaded ' + (r.name || 'the file') + '.' };
     },
   },
   {

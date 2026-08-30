@@ -1802,15 +1802,177 @@
             var rect = el.getBoundingClientRect();
             var cx = rect.left + rect.width / 2;
             var cy = rect.top + rect.height / 2;
+
+            /*
+             * Is anything on top of it?
+             *
+             * The event was dispatched straight at the element, so a click
+             * "succeeded" on a button behind an open modal, under a cookie
+             * banner, or beneath a full-screen overlay — and the agent, told it
+             * had clicked, went on to wait for something that was never going
+             * to happen. A real finger cannot reach through a sheet of glass.
+             *
+             * Reported rather than refused: a decorative wrapper covering its
+             * own child is normal, and only the caller knows whether the thing
+             * on top matters.
+             */
+            var onTop = null;
+            try {
+              var hit = document.elementFromPoint(cx, cy);
+              if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) onTop = describe(hit);
+            } catch (e) { /* detached, or outside the viewport */ }
+
             var opts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0 };
+            var touchy = PROFILE && PROFILE.touch;
+            // A phone fires touch events, and a page that listens for touchstart
+            // rather than click — a carousel, a custom button — never heard from
+            // us at all.
+            if (touchy && window.Touch && window.TouchEvent) {
+              try {
+                var touch = new Touch({ identifier: 1, target: el, clientX: cx, clientY: cy,
+                  radiusX: 11, radiusY: 11, force: 1 });
+                ['touchstart', 'touchend'].forEach(function (t) {
+                  el.dispatchEvent(new TouchEvent(t, {
+                    bubbles: true, cancelable: true, composed: true, view: window,
+                    touches: t === 'touchstart' ? [touch] : [],
+                    targetTouches: t === 'touchstart' ? [touch] : [],
+                    changedTouches: [touch],
+                  }));
+                });
+              } catch (e) { /* the constructor is not everywhere; the mouse events still land */ }
+            }
             ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function (type) {
               var Ctor = type.indexOf('pointer') === 0 && window.PointerEvent ? PointerEvent : MouseEvent;
               el.dispatchEvent(new Ctor(type, type.indexOf('pointer') === 0
-                ? Object.assign({ pointerId: 1, pointerType: 'touch', isPrimary: true }, opts)
+                ? Object.assign({ pointerId: 1, pointerType: touchy ? 'touch' : 'mouse', isPrimary: true }, opts)
                 : opts));
             });
             if (typeof el.focus === 'function') el.focus();
-            toParent({ type: 'dp:input-done', rid: data.rid, kind: 'click', name: describe(el) });
+            toParent({
+              type: 'dp:input-done', rid: data.rid, kind: 'click', name: describe(el),
+              covered: onTop,
+              // 44pt is the contact patch of a fingertip. Below it the tap is a
+              // matter of luck, and that is worth saying at the moment of the
+              // click rather than in a later audit nobody runs.
+              small: PROFILE && PROFILE.touch && (rect.width < 44 || rect.height < 44)
+                ? Math.round(rect.width) + '×' + Math.round(rect.height) : null,
+            });
+            return;
+          }
+
+          /*
+           * Hover.
+           *
+           * A menu that opens on hover, a tooltip, a row that reveals its
+           * actions — none of them could be reached at all. Clicking is not a
+           * substitute: on a page that opens a submenu on mouseenter, a click
+           * lands on the parent and the submenu never appears.
+           */
+          if (data.kind === 'hover') {
+            el.scrollIntoView({ block: 'center', inline: 'center' });
+            var hr = el.getBoundingClientRect();
+            var hx = hr.left + hr.width / 2;
+            var hy = hr.top + hr.height / 2;
+            var hopts = { bubbles: true, cancelable: true, composed: true, view: window, clientX: hx, clientY: hy };
+            ['pointerover', 'mouseover', 'pointermove', 'mousemove', 'pointerenter', 'mouseenter']
+              .forEach(function (type) {
+                var Ctor = type.indexOf('pointer') === 0 && window.PointerEvent ? PointerEvent : MouseEvent;
+                // enter and over differ in whether they bubble; a page that
+                // listens for the wrong one otherwise sees nothing.
+                var o = Object.assign({}, hopts, { bubbles: type.indexOf('enter') < 0 });
+                el.dispatchEvent(new Ctor(type, type.indexOf('pointer') === 0
+                  ? Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, o) : o));
+              });
+            toParent({ type: 'dp:input-done', rid: data.rid, kind: 'hover', name: describe(el) });
+            return;
+          }
+
+          /*
+           * Drag, which on a phone is a swipe.
+           *
+           * A carousel, a slider, a sheet you pull up, a swipe-to-delete row:
+           * all of them need a press, several moves and a release, and none of
+           * them respond to a click. The moves matter — a single jump from
+           * start to end is read as a flick by some libraries and ignored by
+           * others, so the path is walked in steps.
+           */
+          if (data.kind === 'drag') {
+            el.scrollIntoView({ block: 'center', inline: 'center' });
+            var dr = el.getBoundingClientRect();
+            var sx = dr.left + dr.width / 2;
+            var sy = dr.top + dr.height / 2;
+            var ex = sx + (data.dx || 0);
+            var ey = sy + (data.dy || 0);
+            var steps = Math.max(4, Math.min(24, data.steps || 10));
+            var isTouch = PROFILE && PROFILE.touch;
+            var ptr = function (type, x, y, target) {
+              var o = { bubbles: true, cancelable: true, composed: true, view: window,
+                clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1 };
+              (target || el).dispatchEvent(window.PointerEvent
+                ? new PointerEvent(type, Object.assign({ pointerId: 1, pointerType: isTouch ? 'touch' : 'mouse', isPrimary: true }, o))
+                : new MouseEvent(type.replace('pointer', 'mouse'), o));
+            };
+            var touchEv = function (type, x, y, ending) {
+              if (!isTouch || !window.Touch || !window.TouchEvent) return;
+              try {
+                var t = new Touch({ identifier: 1, target: el, clientX: x, clientY: y, radiusX: 11, radiusY: 11, force: 1 });
+                el.dispatchEvent(new TouchEvent(type, {
+                  bubbles: true, cancelable: true, composed: true, view: window,
+                  touches: ending ? [] : [t], targetTouches: ending ? [] : [t], changedTouches: [t],
+                }));
+              } catch (e) { /* not available here */ }
+            };
+            ptr('pointerdown', sx, sy);
+            touchEv('touchstart', sx, sy, false);
+            for (var s = 1; s <= steps; s++) {
+              var px = sx + (ex - sx) * (s / steps);
+              var py = sy + (ey - sy) * (s / steps);
+              // Moves go to whatever is under the pointer, as they would in life
+              // — a drag that leaves its element still has to be followed.
+              var under = null;
+              try { under = document.elementFromPoint(px, py); } catch (e) { under = null; }
+              ptr('pointermove', px, py, under || el);
+              touchEv('touchmove', px, py, false);
+            }
+            ptr('pointerup', ex, ey);
+            touchEv('touchend', ex, ey, true);
+            toParent({
+              type: 'dp:input-done', rid: data.rid, kind: 'drag',
+              name: 'dragged ' + describe(el) + ' by ' + Math.round(data.dx || 0) + ', ' + Math.round(data.dy || 0),
+            });
+            return;
+          }
+
+          /*
+           * Put a file into a file input.
+           *
+           * The bytes arrive from the host, because a page cannot read the
+           * disk. Without this every upload flow — an avatar, a document, an
+           * import — is simply unreachable: the native picker cannot be driven
+           * from script, and clicking the input only opens it.
+           */
+          if (data.kind === 'upload') {
+            if (!(el instanceof HTMLInputElement) || el.type !== 'file') {
+              toParent({
+                type: 'dp:input-done', rid: data.rid,
+                error: describe(el) + ' is not a file input',
+              });
+              return;
+            }
+            var dt = new DataTransfer();
+            (data.files || []).forEach(function (f) {
+              var raw = atob(f.base64 || '');
+              var bytes = new Uint8Array(raw.length);
+              for (var bi = 0; bi < raw.length; bi++) bytes[bi] = raw.charCodeAt(bi);
+              dt.items.add(new File([bytes], f.name, { type: f.type || 'application/octet-stream' }));
+            });
+            el.files = dt.files;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            toParent({
+              type: 'dp:input-done', rid: data.rid, kind: 'upload',
+              name: (data.files || []).map(function (f) { return f.name; }).join(', ') + ' → ' + describe(el),
+            });
             return;
           }
           if (data.kind === 'type') {
