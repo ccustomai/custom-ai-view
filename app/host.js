@@ -1423,12 +1423,28 @@ class AppHost {
           // that choice rather than replacing it.
           await Promise.race([session.ready, new Promise(r => setTimeout(r, 25000))]);
 
+          /*
+           * The device is set on this side before the page is fetched, so the
+           * proxy serves the new identity on the first request rather than the
+           * old one — and the window is told to leave the page alone, because a
+           * URL is coming right behind it.
+           *
+           * Both of those changes used to re-fetch whatever the window was
+           * already showing. That request named the old page and arrived after
+           * the new one, so asking for an address on a particular device landed
+           * on the previous page while reporting the address that was asked for.
+           */
+          const pageComing = !!body.url;
           if (body.device) {
             session.state.deviceId = byId(body.device).id;
-            session.post({ type: 'command', name: 'set-device', payload: { deviceId: session.state.deviceId } });
+            session.post({
+              type: 'command', name: 'set-device',
+              payload: { deviceId: session.state.deviceId, keepPage: pageComing },
+            });
           }
           if (body.orientation && body.orientation !== session.state.orientation) {
-            session.post({ type: 'command', name: 'rotate' });
+            session.state.orientation = body.orientation;
+            session.post({ type: 'command', name: 'rotate', payload: { keepPage: pageComing } });
           }
           if (body.url) await this.navigate(session, body.url);
           return { window: session.id, url: session.currentUrl, device: byId(session.state.deviceId).name };

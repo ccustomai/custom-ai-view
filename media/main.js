@@ -549,7 +549,8 @@
 
   // -------------------------------------------------------------- controls
 
-  function rotate() {
+  /** @param {boolean} [keepPage] As in setDevice: a URL is already on its way. */
+  function rotate(keepPage) {
     state.orientation = state.orientation === 'portrait' ? 'landscape' : 'portrait';
     persist();
     renderStage();
@@ -565,7 +566,7 @@
      * still being served portrait insets, portrait dimensions and a portrait
      * screen.orientation. setDevice has always done this; rotate never did.
      */
-    if (state.proxied && state.realUrl) {
+    if (!keepPage && state.proxied && state.realUrl) {
       vscode.postMessage({ type: 'navigate', url: state.realUrl, force: 'always' });
     }
   }
@@ -585,7 +586,16 @@
     renderStage();
   }
 
-  function setDevice(id) {
+  /*
+   * @param {boolean} [keepPage] The caller is about to send a URL of its own.
+   *
+   * The re-fetch below asks for whatever the window is showing *now*, so when a
+   * device change and a new address arrived together, that request named the old
+   * page and — arriving last — won. "Open this address on an iPhone" then showed
+   * the previous page and reported success. The caller says when it has a page
+   * coming, and this one stands aside.
+   */
+  function setDevice(id, keepPage) {
     state.deviceId = id;
     persist();
     renderStage();
@@ -593,7 +603,7 @@
     vscode.postMessage({ type: 'device-changed', deviceId: id, deviceName: dev.name, orientation: state.orientation });
     // The proxy's User-Agent and screen metrics follow the device, so a proxied
     // page has to be re-fetched to actually see the new identity.
-    if (state.proxied && state.realUrl) {
+    if (!keepPage && state.proxied && state.realUrl) {
       vscode.postMessage({ type: 'navigate', url: state.realUrl, force: 'always' });
     }
   }
@@ -2217,13 +2227,13 @@
 
   function runCommand(name, payload) {
     switch (name) {
-      case 'rotate': rotate(); break;
+      case 'rotate': rotate(payload && payload.keepPage); break;
       case 'back': goBack(); break;
       case 'forward': goForward(); break;
       case 'reload': reload((payload && payload.mode) || 'normal'); break;
       case 'toggle-touch': toggleTouch(); break;
       case 'toggle-grid': toggleGrid(); break;
-      case 'set-device': setDevice(payload.deviceId); break;
+      case 'set-device': setDevice(payload.deviceId, payload.keepPage); break;
       case 'step-device': stepDevice(payload.delta); break;
       case 'copy-url':
         if (state.realUrl) vscode.postMessage({ type: 'copy', text: state.realUrl });
