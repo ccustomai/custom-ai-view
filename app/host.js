@@ -1861,6 +1861,14 @@ class AppHost {
           };
         },
 
+        '/storage': async body => this.ask(body, {
+          type: 'dp:cmd:storage',
+          store: body.store,
+          op: body.op,
+          key: body.key,
+          value: body.value,
+        }, 'dp:storage', 10000),
+
         /*
          * The judgements only this tool can make.
          *

@@ -669,6 +669,44 @@ const TOOLS = [
     },
   },
   {
+    name: 'custom_ai_view_storage',
+    description:
+      'Read or change the previewed site\'s localStorage or sessionStorage. Use it to see '
+      + 'what a page is keeping — a token, a feature flag, a cached payload — or to set one '
+      + 'and reload rather than clicking through a flow to reach the same state. Each site '
+      + 'sees only its own keys: every previewed site is served from one origin, so without '
+      + 'this they would share a bucket, and clearing one would sign you out of all of them.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        store: { type: 'string', enum: ['local', 'session'], description: 'Default local.' },
+        op: {
+          type: 'string',
+          enum: ['read', 'set', 'remove', 'clear'],
+          description: 'Default read. clear removes this site\'s keys only.',
+        },
+        key: { type: 'string' },
+        value: { type: 'string' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/storage', args);
+      const keys = Object.keys(r.items || {});
+      const head = r.store + ' for ' + r.url + ' — ' + r.count + ' key'
+        + (r.count === 1 ? '' : 's')
+        + (r.approxBytes ? ', about ' + Math.round(r.approxBytes / 1024) + ' KB' : '')
+        + (r.namespaced ? '' : '\n(This page is not proxied, so these keys are the shared bucket, '
+          + 'not one site\'s.)');
+      if (!keys.length) return { text: head + '\n\nNothing stored.' };
+      return {
+        text: head + '\n\n' + keys.map(k => '  ' + k + ' = ' + r.items[k]).join('\n')
+          + (r.truncated ? '\n\n' + r.truncated + ' more not shown.' : ''),
+      };
+    },
+  },
+  {
     name: 'custom_ai_view_network',
     description:
       'What the page asked the network for: method, address, status, size and how long each '
