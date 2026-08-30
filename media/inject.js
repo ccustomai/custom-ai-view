@@ -1682,8 +1682,17 @@
          * Input driven from outside, by selector rather than by coordinates: the
          * page is scaled and offset inside the device frame, so window coordinates
          * mean nothing here — a selector is the only stable address.
+         *
+         * This one does NOT use safe(). safe() catches and warns into a console
+         * nobody outside the frame is reading, and never replies — so a throw
+         * here left the caller waiting out its eight-second timeout and told it
+         * "The page did not answer in time. Is it loaded through the proxy?".
+         * The proxy was fine; the element was a <select>. A wrong tool has to
+         * come back as a wrong tool, in milliseconds, saying which element it
+         * was and what it is.
          */
-        safe('remote input', function () {
+        (function () {
+          try {
           var el = data.selector ? document.querySelector(data.selector) : null;
           if (data.kind === 'scroll') {
             var target = el || window;
@@ -1717,11 +1726,74 @@
           }
           if (data.kind === 'type') {
             if (typeof el.focus === 'function') el.focus();
-            var setter = Object.getOwnPropertyDescriptor(
-              el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
-              'value'
-            );
+
+            /*
+             * A <select> is not a text field.
+             *
+             * The native value setter was taken from HTMLInputElement.prototype
+             * and called on whatever matched. On a <select>, a contenteditable
+             * div, or a custom element that throws "Illegal invocation" — and
+             * the two fallbacks below it were unreachable, because the throw
+             * came first. Every dropdown on every form was undrivable, and said
+             * so by timing out.
+             *
+             * Choosing by visible label as well as by value is deliberate: an
+             * agent reading the page sees "United Kingdom", not "GB".
+             */
+            if (el.tagName === 'SELECT') {
+              var wanted = String(data.text);
+              var picked = -1;
+              for (var oi = 0; oi < el.options.length; oi++) {
+                var opt = el.options[oi];
+                if (opt.value === wanted || (opt.textContent || '').trim() === wanted) { picked = oi; break; }
+              }
+              if (picked < 0) {
+                var had = [];
+                for (var oj = 0; oj < Math.min(el.options.length, 12); oj++) {
+                  had.push((el.options[oj].textContent || '').trim() + ' (' + el.options[oj].value + ')');
+                }
+                toParent({
+                  type: 'dp:input-done', rid: data.rid,
+                  error: 'No option "' + wanted + '" in ' + describe(el) + '. It offers: ' + had.join(', ')
+                    + (el.options.length > 12 ? ', and ' + (el.options.length - 12) + ' more' : ''),
+                });
+                return;
+              }
+              el.selectedIndex = picked;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              toParent({
+                type: 'dp:input-done', rid: data.rid, kind: 'select',
+                name: 'chose "' + (el.options[picked].textContent || '').trim() + '" in ' + describe(el),
+              });
+              return;
+            }
+
+            // A rich-text editor has no value at all. execCommand is deprecated
+            // and is still the only way to make one see a real input event —
+            // setting textContent leaves React's editor state untouched.
+            if (el.isContentEditable) {
+              var range = document.createRange();
+              range.selectNodeContents(el);
+              var sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+              var inserted = false;
+              try { inserted = document.execCommand('insertText', false, data.text); } catch (e) { inserted = false; }
+              if (!inserted) {
+                el.textContent = data.text;
+                el.dispatchEvent(new InputEvent('input', { bubbles: true, data: data.text, inputType: 'insertText' }));
+              }
+              if (data.key) pressKey(el, data.key);
+              toParent({ type: 'dp:input-done', rid: data.rid, kind: 'type', name: describe(el) });
+              return;
+            }
+
+            var proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+              : el instanceof HTMLInputElement ? HTMLInputElement.prototype : null;
             // React and friends listen to the native setter, not to el.value = x.
+            // Only reach for it when the element really is one of those two.
+            var setter = proto && Object.getOwnPropertyDescriptor(proto, 'value');
             if (setter && setter.set) setter.set.call(el, data.text);
             else if ('value' in el) el.value = data.text;
             else el.textContent = data.text;
@@ -1741,7 +1813,14 @@
               name: (data.key || 'Enter') + ' on ' + describe(el),
             });
           }
-        });
+          } catch (err) {
+            toParent({
+              type: 'dp:input-done', rid: data.rid,
+              error: String(err && err.message ? err.message : err)
+                + (data.selector ? ' — on ' + data.selector : ''),
+            });
+          }
+        })();
         break;
       case 'dp:cmd:ready':
         // Cheap enough to poll every quarter second: has the document finished, and
