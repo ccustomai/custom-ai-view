@@ -321,8 +321,11 @@ class CdpSession {
         if (msg.error) reject(new Error(msg.error.message || 'CDP error'));
         else resolve(msg.result);
       } else if (msg.method) {
+        // The session an event came from, passed on to the handler. A
+        // cross-origin iframe is a target of its own, and without knowing which
+        // one spoke there is no way to answer it.
         const list = this.handlers.get(msg.method);
-        if (list) list.forEach(fn => fn(msg.params));
+        if (list) list.forEach(fn => fn(msg.params, msg.sessionId));
       }
     };
     ws.onClose = () => {
@@ -345,7 +348,12 @@ class CdpSession {
     this.handlers.delete(method);
   }
 
-  send(method, params, timeout = 30000) {
+  /**
+   * @param {string} [sessionId] Send into an attached target rather than this one.
+   *   Cross-origin iframes run in their own process and answer only on their own
+   *   session; a command without this reaches the top-level page and nothing else.
+   */
+  send(method, params, timeout = 30000, sessionId) {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -362,7 +370,9 @@ class CdpSession {
           reject(e);
         },
       });
-      this.ws.send(JSON.stringify({ id, method, params: params || {} }));
+      const frame = { id, method, params: params || {} };
+      if (sessionId) frame.sessionId = sessionId;
+      this.ws.send(JSON.stringify(frame));
     });
   }
 

@@ -66,6 +66,33 @@ than reporting the frame as proof.
 
 Firefox likewise is not available.
 
+## How the page reaches the frame, and what that costs
+
+By default the site is fetched through a local proxy, which makes any page
+embeddable and substitutes the device's metrics and safe-area insets. The price
+is paid in fidelity, and it is worth knowing before you draw a conclusion:
+framing and security headers are stripped, service workers are switched off, and
+every previewed site shares one origin, so cookies and storage are not the
+site's own. **A CSP violation, a service-worker or PWA-offline fault, an SRI
+break, or a `SameSite` cookie problem cannot be reproduced in this mode** — their
+absence here is not evidence that they are absent in production.
+
+Setting `directOrigin: true` in `~/.custom-ai-view/settings.json` switches to
+direct mode. The browser fetches the site itself; only `X-Frame-Options` and the
+`frame-ancestors` directive are removed in flight, and the rest of the response
+is untouched. The page then runs on its **own origin**, with its own cookies and
+its own storage, and the rest of its Content-Security-Policy stays in force.
+
+Two consequences to expect in that mode. `custom_ai_view_evaluate` will be
+refused by any site whose policy forbids evaluating strings — that is the real
+policy behaving normally, not a fault, and `find`, `inspect`, `snapshot`,
+`storage` and the input tools all still work because none of them evaluate a
+string. And CORS is not enforced in that browser instance, so a cross-origin
+request that production would block will succeed here.
+
+`custom_ai_view_state` reports `proxied`, so you can always tell which mode a
+window is in before trusting what it shows.
+
 ## Things that will otherwise cost you a round trip
 
 **Find by selector, not by visible text, unless the text is yours.** A site

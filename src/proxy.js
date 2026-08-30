@@ -587,6 +587,33 @@ class PreviewProxy {
    * The capture page has to live here rather than on the webview's origin: it embeds
    * the proxied site, and same-origin is what lets it talk to the injected shim.
    */
+  /**
+   * The source of one of the files above, for a caller that has to deliver it
+   * some other way.
+   *
+   * In direct mode there is no HTML passing through here to carry a script tag,
+   * so the shim goes into the page over the debugger instead — but it is the
+   * same file, read and cached in the same place, rather than a second copy
+   * that can drift out of step with this one.
+   *
+   * @param {string} name e.g. 'inject.js'
+   * @returns {string}
+   */
+  asset(name) {
+    if (!this._assets) this._assets = new Map();
+    if (!this._assets.has(name)) {
+      const full = name === 'devices.js'
+        ? path.join(this.mediaDir, '..', 'src', 'devices.js')
+        : path.join(this.mediaDir, name);
+      try {
+        this._assets.set(name, fs.readFileSync(full, 'utf8'));
+      } catch (err) {
+        this._assets.set(name, `/* custom-ai-view: ${name} missing — ${String(err.message)} */`);
+      }
+    }
+    return this._assets.get(name);
+  }
+
   _internal(rest, req, res) {
     const file = rest.split('?')[0].replace(/^\//, '');
 

@@ -780,8 +780,19 @@ const TOOLS = [
       const head = r.store + ' for ' + r.url + ' — ' + r.count + ' key'
         + (r.count === 1 ? '' : 's')
         + (r.approxBytes ? ', about ' + Math.round(r.approxBytes / 1024) + ' KB' : '')
-        + (r.namespaced ? '' : '\n(This page is not proxied, so these keys are the shared bucket, '
-          + 'not one site\'s.)');
+        /*
+         * Not namespaced means two opposite things, and saying the wrong one is
+         * worse than saying nothing. Through the proxy, every site shares one
+         * origin, so an un-namespaced read is the shared bucket. In direct mode
+         * the page is on its own origin, so these are the site's real keys —
+         * the best case there is, and the reason namespacing is not needed.
+         */
+        + (r.namespaced ? ''
+          : r.direct
+            ? '\n(This page is on its own origin, so these are the site\'s real keys — '
+              + 'exactly what a visitor\'s browser holds.)'
+            : '\n(This page is not proxied, so these keys are the shared bucket, '
+              + 'not one site\'s.)');
       if (!keys.length) return { text: head + '\n\nNothing stored.' };
       return {
         text: head + '\n\n' + keys.map(k => '  ' + k + ' = ' + r.items[k]).join('\n')

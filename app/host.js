@@ -815,6 +815,24 @@ class AppHost {
       return;
     }
 
+    /*
+     * Direct mode wins over everything else: the point of it is that the
+     * address in the frame is the real one, so there is no condition under
+     * which it should quietly fall back to the proxy without saying so.
+     */
+    if (this.settings.directOrigin) {
+      try {
+        await this.armDirect(session);
+        session.currentUrl = url;
+        session.proxied = false;
+        this.remember(url);
+        session.post({ type: 'load', url, real: url, proxied: false, kind: 'web' });
+        return;
+      } catch (err) {
+        this.log('direct mode could not be armed, falling back to the proxy: ' + err.message);
+      }
+    }
+
     const mode = force || session.state.touchEmulation || this.settings.touchEmulation || 'always';
     let useProxy = mode === 'always';
     let reason = '';
@@ -897,6 +915,93 @@ class AppHost {
         + 'build for that, not the one this device would get. Clear userAgent.' + osName
         + ' in settings to see the real thing.',
     };
+  }
+
+  /*
+   * Arm direct mode on a window.
+   *
+   * Two jobs, both of which the proxy used to do by rewriting the response:
+   * take the framing headers off so the page can be shown at all, and put the
+   * shim in so it can be driven. Nothing else about the response is touched —
+   * the rest of the CSP stays in force, the cookies stay the site's own, the
+   * storage belongs to the real origin, and the address in the frame is the
+   * address the person asked for.
+   *
+   * Armed once per window; the interception outlives navigation.
+   */
+  async armDirect(session) {
+    if (session.directArmed) return;
+    const cdp = await this.attach(session);
+    session.directArmed = true;
+
+    const boot = 'window.__DEVICE_PREVIEW__=' + JSON.stringify({
+      token: '', key: '', proxy: '', direct: true,
+      origin: originOf(session.currentUrl) || '',
+      profile: this.profileFor(session),
+      hasViewport: true,
+      edits: this.proxy.editsFor(originOf(session.currentUrl)),
+    }) + ';';
+
+    await cdp.send('Page.enable').catch(() => {});
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: boot + '\n' + this.proxy.asset('inject.js'),
+    });
+
+    cdp.on('Fetch.requestPaused', async (p, sid) => {
+      const id = p.requestId;
+      try {
+        /*
+         * A navigation that may change process is paused before its response
+         * exists, whatever the pattern asked for. Continuing it plainly here is
+         * how the framing headers survived every attempt to remove them; asking
+         * for it back at the response stage is the only point one can be taken
+         * off.
+         */
+        if (p.responseStatusCode === undefined) {
+          await cdp.send('Fetch.continueRequest', { requestId: id, interceptResponse: true }, 20000, sid);
+          return;
+        }
+
+        let touched = false;
+        const headers = (p.responseHeaders || []).filter(h => {
+          if (h.name.toLowerCase() === 'x-frame-options') { touched = true; return false; }
+          return true;
+        }).map(h => {
+          // Only frame-ancestors goes. The rest of the policy is left standing,
+          // which is the whole point of the mode — a CSP violation in the site
+          // has to still be a CSP violation here.
+          if (h.name.toLowerCase().startsWith('content-security-policy') && /frame-ancestors/i.test(h.value)) {
+            touched = true;
+            return { name: h.name, value: h.value.replace(/frame-ancestors[^;]*;?\s*/gi, '') };
+          }
+          return h;
+        });
+
+        if (!touched) {
+          await cdp.send('Fetch.continueRequest', { requestId: id }, 20000, sid);
+          return;
+        }
+
+        const body = await cdp.send('Fetch.getResponseBody', { requestId: id }, 25000, sid).catch(() => null);
+        await cdp.send('Fetch.fulfillRequest', {
+          requestId: id,
+          responseCode: p.responseStatusCode,
+          responseHeaders: headers,
+          body: body
+            ? (body.base64Encoded ? body.body : Buffer.from(body.body, 'utf8').toString('base64'))
+            : undefined,
+        }, 25000, sid);
+      } catch (err) {
+        // Say why, then let it through rather than hanging the page on it. A
+        // silent retry here is how an unsupported parameter once turned into
+        // "the header was never stripped" with nothing to explain it.
+        this.log('direct mode could not rewrite ' + p.request.url.slice(0, 80) + ' — ' + err.message);
+        await cdp.send('Fetch.continueRequest', { requestId: id }, 20000, sid).catch(() => {});
+      }
+    });
+
+    await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Response' }] });
+    this.log('direct mode armed on window ' + session.id + ' — pages load from their own origin');
   }
 
   profileFor(session) {
@@ -1212,6 +1317,37 @@ class AppHost {
       '--disable-features=Translate,MediaRouter',
       '--disable-background-networking',
     ];
+
+    /*
+     * Direct mode: show the site at its own address instead of through the proxy.
+     *
+     * The proxy exists to make any site embeddable, and everything expensive
+     * about this product follows from that one decision — cookies in a shared
+     * jar, storage that has to be namespaced per site, CSS rewritten to
+     * substitute the insets, service workers switched off, and a whole class of
+     * production bug that cannot be reproduced at all: CSP violations, PWA
+     * offline, push, SameSite.
+     *
+     * Here the response is left alone except for the two headers that block
+     * framing, so the page keeps its real origin, its real cookies and its real
+     * storage. Two flags make that deterministic. Site isolation would put a
+     * cross-origin frame in a process of its own, created only after the
+     * response has committed — so arming interception on it is a race, and it
+     * was measured to be a race lost against any local dev server. And the
+     * framing check itself is enforced before interception can reach it.
+     *
+     * The trade: CORS is not enforced in this browser instance, so a CORS fault
+     * in the site under test will not reproduce here. That is a real cost, and
+     * it is why this is a mode rather than the default.
+     */
+    if (this.settings.directOrigin) {
+      args.push(
+        '--disable-features=IsolateOrigins,site-per-process,Translate,MediaRouter',
+        '--disable-site-isolation-trials',
+        '--disable-web-security'
+      );
+    }
+
     if (!this.chromePort) args.push('--remote-debugging-port=0');
 
     const proc = spawn(chrome, args, { stdio: 'ignore', windowsHide: false, detached: false });
@@ -2234,13 +2370,19 @@ class AppHost {
           };
         },
 
-        '/storage': async body => this.ask(body, {
-          type: 'dp:cmd:storage',
-          store: body.store,
-          op: body.op,
-          key: body.key,
-          value: body.value,
-        }, 'dp:storage', 10000),
+        '/storage': async body => {
+          const r = await this.ask(body, {
+            type: 'dp:cmd:storage',
+            store: body.store,
+            op: body.op,
+            key: body.key,
+            value: body.value,
+          }, 'dp:storage', 10000);
+          // Un-namespaced means opposite things in the two modes; the caller
+          // cannot tell them apart without being told which mode this is.
+          r.direct = !!this.settings.directOrigin;
+          return r;
+        },
 
         /*
          * The judgements only this tool can make.
@@ -2475,11 +2617,35 @@ class AppHost {
          * A longer timeout than the rest: an expression is allowed to await
          * something, and the ones worth writing usually do.
          */
-        '/evaluate': async body => this.ask(body, {
-          type: 'dp:cmd:eval',
-          expression: String(body.expression || ''),
-          selector: body.selector,
-        }, 'dp:evaluated', Math.min(30000, Math.max(1000, body.timeoutMs || 10000))),
+        '/evaluate': async body => {
+          try {
+            return await this.ask(body, {
+              type: 'dp:cmd:eval',
+              expression: String(body.expression || ''),
+              selector: body.selector,
+            }, 'dp:evaluated', Math.min(30000, Math.max(1000, body.timeoutMs || 10000)));
+          } catch (err) {
+            /*
+             * The site's own Content-Security-Policy refusing to run a string.
+             *
+             * In direct mode the policy is left in force — only frame-ancestors
+             * is removed — so this is the real page behaving exactly as it does
+             * for a visitor. Reported plainly, because the raw message reads
+             * like a fault in the tool, and the answer is to ask a different
+             * way rather than to go looking for a bug that is not there.
+             */
+            if (/Content Security Policy|unsafe-eval/i.test(err.message)) {
+              throw new Error(
+                "The site's own Content-Security-Policy forbids evaluating strings, and this "
+                + 'window is showing the site at its real origin with that policy in force — so '
+                + 'this is the page behaving as it does for a visitor, not a fault here. '
+                + 'find, inspect, snapshot, storage and the input tools all still work; they do '
+                + 'not evaluate strings. The policy was: ' + err.message.replace(/^[^:]*:\s*/, '')
+              );
+            }
+            throw err;
+          }
+        },
       },
     });
 
