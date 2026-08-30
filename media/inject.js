@@ -1537,6 +1537,35 @@
    *
    * `rid` is left off entirely when the panel asks, so nothing there changes.
    */
+  /*
+   * How long the document has been still.
+   *
+   * "Has it finished loading" is answered by readyState on a page that loads
+   * once. On a single-page app readyState is 'complete' the moment the shell
+   * arrives and stays that way for the rest of the session — so a wait for
+   * "loading to finish" returned true immediately, every time, however much
+   * was still in flight. What actually distinguishes a settled view from one
+   * still assembling itself is that the DOM has stopped changing.
+   *
+   * The observer is installed on first use rather than at load: a page nobody
+   * ever waits on should not pay for it.
+   */
+  var lastMutation = 0;
+  var quietObserver = null;
+  function quietSince() {
+    if (!quietObserver && window.MutationObserver && document.documentElement) {
+      lastMutation = Date.now();
+      quietObserver = new MutationObserver(function () { lastMutation = Date.now(); });
+      quietObserver.observe(document.documentElement, {
+        childList: true, subtree: true, attributes: true, characterData: true,
+      });
+      // Nothing is known about the past, so the first answer must not claim
+      // stillness it did not observe.
+      return 0;
+    }
+    return lastMutation ? Date.now() - lastMutation : 0;
+  }
+
   function sendTree(path, rid) {
     var reply = function (extra) {
       var msg = { type: 'dp:tree', path: path || [] };
@@ -1833,6 +1862,11 @@
             pendingImages: Array.prototype.filter.call(document.images || [], function (img) {
               return !img.complete;
             }).length,
+            // How long the document has been still. readyState went 'complete'
+            // when the shell loaded and never changes again, so on a single-page
+            // app it is true from the first tick and says nothing about whether
+            // the view being waited for has arrived. Quiet does.
+            msSinceMutation: quietSince(),
           });
         });
         break;

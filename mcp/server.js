@@ -209,7 +209,10 @@ const TOOLS = [
       'What the Custom AI View browser is showing right now: current URL, device, viewport size, ' +
       'orientation, whether it is proxied, and the element the user currently has selected.',
     inputSchema: { type: 'object', properties: { window: WINDOW_ARG }, additionalProperties: false },
-    run: () => call('/state', {}).then(state => ({ text: JSON.stringify(state, null, 2) })),
+    // Pass the arguments on. Dropping them meant a question about the second
+    // window was answered with the first window's URL, device and selection,
+    // and nothing said so.
+    run: args => call('/state', args).then(state => ({ text: JSON.stringify(state, null, 2) })),
   },
   {
     name: 'custom_ai_view_devices',
@@ -501,8 +504,8 @@ const TOOLS = [
     name: 'custom_ai_view_edits',
     description: 'List the live edits currently being replayed into every page load.',
     inputSchema: { type: 'object', properties: { window: WINDOW_ARG }, additionalProperties: false },
-    run: async () => {
-      const r = await call('/edits', {});
+    run: async args => {
+      const r = await call('/edits', args);
       if (!r.edits || !r.edits.length) return { text: 'No live edits are active.' };
       return {
         text: r.edits
@@ -518,8 +521,8 @@ const TOOLS = [
     description:
       'Drop every live edit and reload, putting the page back exactly as the site serves it.',
     inputSchema: { type: 'object', properties: { window: WINDOW_ARG }, additionalProperties: false },
-    run: async () => {
-      const r = await call('/revert', {});
+    run: async args => {
+      const r = await call('/revert', args);
       return { text: r.cleared ? 'Reverted ' + r.cleared + ' edit(s) and reloaded.' : 'There was nothing to revert.' };
     },
   },

@@ -1582,18 +1582,38 @@ class AppHost {
               ? 'the text "' + body.text + '"' + (wantGone ? ' to go away' : ' to appear')
               : 'loading to finish';
 
+          /*
+           * What counts as arrived.
+           *
+           * A box with width was not enough: find already reports whether an
+           * element is really visible and whether it is anywhere near the
+           * viewport, and both were being thrown away. A spinner at opacity 0
+           * halfway through its fade, or the duplicate slide a carousel parks
+           * at x=-1925, both have width — so the wait returned, and whatever
+           * came next acted on something nobody could see.
+           *
+           * Several matches are asked for rather than one, because the first
+           * match in document order is often the hidden one.
+           */
+          const QUIET_MS = 300;
           const settled = async () => {
             if (body.selector || body.text) {
               const found = await this.ask(body, {
-                type: 'dp:cmd:find', selector: body.selector, text: body.text, limit: 1,
+                type: 'dp:cmd:find', selector: body.selector, text: body.text, limit: 5,
               }, 'dp:found', 4000).catch(() => null);
-              const hit = !!(found && found.matches && found.matches.length &&
-                found.matches[0].rect && found.matches[0].rect.width > 0);
+              const hit = !!(found && found.matches
+                && found.matches.some(m => m.visible && !m.offscreen));
               return wantGone ? !hit : hit;
             }
             const ready = await this.ask(body, { type: 'dp:cmd:ready' }, 'dp:ready-state', 4000)
               .catch(() => null);
-            return !!(ready && ready.readyState === 'complete');
+            if (!ready || ready.readyState !== 'complete') return false;
+            if (ready.pendingImages > 0) return false;
+            // On a single-page app readyState is 'complete' from the first tick
+            // and stays there, so on its own it answered "yes" instantly and
+            // for ever. Stillness is what actually separates a finished view
+            // from one still assembling itself.
+            return (ready.msSinceMutation || 0) >= QUIET_MS;
           };
 
           while (Date.now() - started < timeout) {
