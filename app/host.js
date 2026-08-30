@@ -1577,17 +1577,19 @@ class AppHost {
         '/network': async body => {
           const session = body.window ? this.sessions.get(body.window) : await sessionSoon();
           if (!session) return { entries: [], total: 0, failed: 0, pending: 0, proxied: false };
-          return Object.assign(
-            this.proxy.network({
-              window: session.id,
-              failures: body.failures === true,
-              url: body.url,
-              limit: body.limit,
-            }),
+          const log = this.proxy.network({
+            window: session.id,
+            failures: body.failures === true,
+            url: body.url,
+            limit: body.limit,
+          });
+          return Object.assign({}, log, {
             // Nothing is recorded for a page the proxy is not carrying, and "no
             // requests" would otherwise read as "the page made none".
-            { proxied: !!session.proxied, url: session.currentUrl }
-          );
+            proxied: !!session.proxied,
+            url: session.currentUrl,
+            text: networkText(log, body, !!session.proxied),
+          });
         },
 
         // Real input and real edits in the real window, so an agent can drive and
@@ -1679,6 +1681,186 @@ class AppHost {
          * A longer wait than the usual eight seconds: the walk touches every element
          * and measures the ones worth reporting, which on a heavy page is real work.
          */
+        /*
+         * What the page asked the network for.
+         *
+         * Every byte of every request already passes through the proxy, and
+         * none of it was remembered. So the console could show what the page
+         * chose to print and nothing could show the 401 behind a blank screen,
+         * the request that never came back, or the three-megabyte image that
+         * made the thing slow — which is most of what "it is broken" turns out
+         * to mean.
+         */
+        /*
+         * Emulation, over the DevTools protocol.
+         *
+         * Dark mode is the one that matters and the one that was missing: every
+         * site has one now and there was no way to see it. Throttling is next —
+         * a phone on a slow connection is the condition most bugs hide in, and
+         * being in the conditions the device is in is the whole point.
+         *
+         * What is overridden is kept on the session and reported back. An
+         * override nobody remembers setting is a trap: the page looks wrong,
+         * nothing in the page explains it, and the cause is a switch thrown an
+         * hour ago in another conversation.
+         */
+        '/emulate': async body => {
+          const session = body.window ? this.sessions.get(body.window) : await sessionSoon();
+          if (!session) throw new Error('No window is open.');
+          const cdp = await this.attach(session);
+          const on = session.emulation || (session.emulation = {});
+
+          /*
+           * Nothing here swallows its error.
+           *
+           * These were written with .catch(() => {}) on every call, which is how
+           * an override that never took reported success — the page carried on
+           * in the browser's own locale and the answer said it had changed. The
+           * failures are collected and named instead: a switch that did not
+           * throw is the only reason to believe it was thrown.
+           */
+          const failed = [];
+          const attempt = async (label, method, params) => {
+            try {
+              await cdp.send(method, params);
+              return true;
+            } catch (err) {
+              failed.push(label + ' (' + (err && err.message ? err.message : err) + ')');
+              return false;
+            }
+          };
+
+          if (body.reset) {
+            await attempt('media', 'Emulation.setEmulatedMedia', { media: '', features: [] });
+            await attempt('network', 'Network.emulateNetworkConditions', {
+              offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+            });
+            await attempt('geolocation', 'Emulation.clearGeolocationOverride', {});
+            // These two were left set by the old reset, so a locale chosen an
+            // hour ago survived a clear that claimed to have removed everything.
+            if (on.locale) await attempt('locale', 'Emulation.setLocaleOverride', {});
+            if (on.timezone) await attempt('timezone', 'Emulation.setTimezoneOverride', { timezoneId: '' });
+            session.emulation = {};
+            return {
+              emulation: {},
+              text: 'All emulation overrides cleared.'
+                + (failed.length ? '\nExcept: ' + failed.join('; ') + '.' : '')
+                + '\nWhat the page reports now is what this machine actually is — if it still '
+                + 'looks dark, this machine is dark.',
+            };
+          }
+
+          /*
+           * The media features go in one call together.
+           *
+           * setEmulatedMedia replaces the whole list rather than adding to it,
+           * so sending reduced motion on its own would quietly switch dark mode
+           * back off — and the page would change for a reason nobody could see.
+           */
+          if (body.colorScheme) on.colorScheme = body.colorScheme;
+          if (body.reducedMotion) on.reducedMotion = body.reducedMotion;
+          if (body.forcedColors) on.forcedColors = body.forcedColors;
+          if (body.print !== undefined) on.print = !!body.print;
+          if (body.colorScheme || body.reducedMotion || body.forcedColors || body.print !== undefined) {
+            const features = [];
+            if (on.colorScheme) features.push({ name: 'prefers-color-scheme', value: on.colorScheme });
+            if (on.reducedMotion) features.push({ name: 'prefers-reduced-motion', value: on.reducedMotion });
+            if (on.forcedColors) features.push({ name: 'forced-colors', value: on.forcedColors });
+            await cdp.send('Emulation.setEmulatedMedia', { media: on.print ? 'print' : '', features });
+          }
+
+          if (body.network) {
+            // Roughly the shapes Chrome's own presets use — what a phone on a
+            // bad connection actually gets, rather than a round number.
+            const PROFILES = {
+              offline: { offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0 },
+              'slow-3g': { offline: false, latency: 400, downloadThroughput: 50000, uploadThroughput: 50000 },
+              'fast-3g': { offline: false, latency: 150, downloadThroughput: 180000, uploadThroughput: 84000 },
+              '4g': { offline: false, latency: 60, downloadThroughput: 1000000, uploadThroughput: 500000 },
+              none: { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 },
+            };
+            const p = PROFILES[body.network];
+            if (!p) {
+              throw new Error('Unknown network "' + body.network + '". One of: '
+                + Object.keys(PROFILES).join(', '));
+            }
+            await cdp.send('Network.enable', {}).catch(() => {});
+            await cdp.send('Network.emulateNetworkConditions', p);
+            on.network = body.network === 'none' ? null : body.network;
+          }
+
+          if (body.latitude !== undefined && body.longitude !== undefined) {
+            if (await attempt('geolocation', 'Emulation.setGeolocationOverride', {
+              latitude: body.latitude, longitude: body.longitude, accuracy: body.accuracy || 20,
+            })) on.geolocation = body.latitude + ', ' + body.longitude;
+          }
+          if (body.locale) {
+            if (await attempt('locale', 'Emulation.setLocaleOverride', { locale: body.locale })) {
+              on.locale = body.locale;
+            }
+          }
+          if (body.timezone) {
+            if (await attempt('timezone', 'Emulation.setTimezoneOverride', { timezoneId: body.timezone })) {
+              on.timezone = body.timezone;
+            }
+          }
+
+          /*
+           * Ask the page whether it noticed.
+           *
+           * The protocol accepting a call is not the same as the page being in
+           * the state it describes. setLocaleOverride is sent to the top target
+           * and the previewed document is a cross-origin frame with a target of
+           * its own, so it goes on reporting the browser's own language while
+           * the call comes back clean. Reporting that as a success is the same
+           * class of lie as a timeout blaming the proxy: the answer says one
+           * thing and the page is another.
+           */
+          const ignored = [];
+          if (on.locale || on.timezone || on.colorScheme) {
+            const seen = await this.ask({ window: session.id }, {
+              type: 'dp:cmd:eval',
+              expression: '({ lang: navigator.language,'
+                + ' tz: Intl.DateTimeFormat().resolvedOptions().timeZone,'
+                + ' dark: matchMedia("(prefers-color-scheme: dark)").matches })',
+            }, 'dp:evaluated', 5000).catch(() => null);
+            const v = seen && seen.value;
+            if (v) {
+              if (on.locale && String(v.lang || '').toLowerCase() !== String(on.locale).toLowerCase()) {
+                ignored.push('locale — the page still reports ' + v.lang);
+              }
+              if (on.timezone && v.tz !== on.timezone) {
+                ignored.push('timezone — the page still reports ' + v.tz);
+              }
+              if (on.colorScheme && on.colorScheme !== 'no-preference'
+                && v.dark !== (on.colorScheme === 'dark')) {
+                ignored.push('colour scheme — the page still reports '
+                  + (v.dark ? 'dark' : 'light'));
+              }
+            }
+          }
+
+          const live = Object.entries(on).filter(([, v]) => v).map(([k, v]) => k + ': ' + v);
+          return {
+            emulation: on,
+            failed,
+            ignored,
+            text: (live.length
+              ? 'Now emulating — ' + live.join(', ') + '.'
+              : 'Nothing is being emulated.')
+              + (failed.length
+                ? '\nRefused by the browser, and therefore NOT in force: ' + failed.join('; ') + '.'
+                : '')
+              + (ignored.length
+                ? '\nAccepted by the browser but NOT reaching the page: ' + ignored.join('; ')
+                  + '. The previewed document is a frame with its own target, and these '
+                  + 'overrides do not cross into it. Treat them as not applied.'
+                : '')
+              + '\nA page that read any of these once at startup, rather than watching for '
+              + 'changes, needs a reload to notice.',
+          };
+        },
+
         /*
          * The judgements only this tool can make.
          *
@@ -1984,6 +2166,59 @@ function outlineText(outline, device) {
   }
   if (missing.length) lines.push('Not listed: ' + missing.join('; ') + '.');
 
+  return lines.join('\n');
+}
+
+/**
+ * The network log, as something worth reading.
+ *
+ * Ordered oldest first, because a failure means little without what came before
+ * it. Navigation boundaries are printed as rules: a 401 on this page and the
+ * identical 401 three pages ago are different facts, and without the boundary
+ * they are the same line.
+ */
+function networkText(log, opts, proxied) {
+  const lines = [];
+  const size = n => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
+    : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B');
+
+  const head = log.total + ' request' + (log.total === 1 ? '' : 's')
+    + (log.failed ? ', ' + log.failed + ' failed' : '')
+    + (log.pending ? ', ' + log.pending + ' still in flight' : '');
+  lines.push(head + ((opts && opts.failures) ? ' — showing failures only'
+    : (opts && opts.url) ? ' — matching "' + opts.url + '"' : ''));
+
+  if (!log.entries.length) {
+    lines.push('');
+    lines.push(log.total
+      ? 'Nothing matched. The filter, not the page, may be what is empty.'
+      : proxied === false
+        ? 'Nothing recorded, and nothing will be: this page is being shown without the '
+          + 'proxy, so its traffic never comes past here. Reopen it proxied to see the log.'
+        : 'Nothing recorded. The page has made no requests yet.');
+    return lines.join('\n');
+  }
+  lines.push('');
+
+  for (const e of log.entries) {
+    if (e.nav) {
+      lines.push('── navigated to ' + e.url);
+      continue;
+    }
+    const status = e.pending ? '...' : (e.failed && !e.status ? 'ERR' : String(e.status));
+    lines.push(
+      '  ' + status.padStart(3) + '  ' + e.method.padEnd(4)
+      + ' ' + String(e.ms || 0).padStart(5) + 'ms'
+      + ' ' + size(e.bytes || 0).padStart(7)
+      + '  ' + (e.type || '').padEnd(24).slice(0, 24)
+      + '  ' + e.url
+      + (e.error ? '\n         ' + e.error : '')
+    );
+  }
+  if (log.matched > log.entries.filter(e => !e.nav).length) {
+    lines.push('');
+    lines.push(log.matched + ' matched; the most recent are shown. Raise the limit for the rest.');
+  }
   return lines.join('\n');
 }
 

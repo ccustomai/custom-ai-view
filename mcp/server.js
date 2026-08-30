@@ -669,6 +669,66 @@ const TOOLS = [
     },
   },
   {
+    name: 'custom_ai_view_network',
+    description:
+      'What the page asked the network for: method, address, status, size and how long each '
+      + 'took, oldest first, with a rule drawn where the page navigated. The console shows '
+      + 'what a page chose to say about itself; this shows the 401 behind a blank screen, the '
+      + 'fetch that never came back, and the three-megabyte image that made it slow — which '
+      + 'is most of what "it is broken" turns out to mean. Every request already passes '
+      + 'through the proxy, so nothing needs to be instrumented.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        failures: { type: 'boolean', description: 'Only what failed or is still in flight.' },
+        url: { type: 'string', description: 'Only addresses containing this text.' },
+        limit: { type: 'number', description: 'How many entries, default 50.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/network', args);
+      return { text: r.text || JSON.stringify(r, null, 2) };
+    },
+  },
+  {
+    name: 'custom_ai_view_emulate',
+    description:
+      'Put the page in conditions other than this machine\'s. Dark mode, reduced motion, '
+      + 'forced colours, print; a throttled connection or none at all; a location, a locale, '
+      + 'a timezone. Every site has a dark mode and there was no other way to see it, and a '
+      + 'phone on a slow connection is the condition most bugs hide in. What is overridden is '
+      + 'reported back on every call — an override nobody remembers setting is a page that '
+      + 'looks wrong for no visible reason.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        colorScheme: { type: 'string', enum: ['light', 'dark', 'no-preference'] },
+        reducedMotion: { type: 'string', enum: ['reduce', 'no-preference'] },
+        forcedColors: { type: 'string', enum: ['active', 'none'] },
+        print: { type: 'boolean', description: 'Render as the printed page would be.' },
+        network: {
+          type: 'string',
+          enum: ['offline', 'slow-3g', 'fast-3g', '4g', 'none'],
+          description: '"none" removes the throttle.',
+        },
+        latitude: { type: 'number' },
+        longitude: { type: 'number' },
+        accuracy: { type: 'number', description: 'Metres. Default 20.' },
+        locale: { type: 'string', description: 'e.g. "el-GR".' },
+        timezone: { type: 'string', description: 'e.g. "Europe/Athens".' },
+        reset: { type: 'boolean', description: 'Clear every override.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/emulate', args);
+      return { text: r.text || JSON.stringify(r.emulation, null, 2) };
+    },
+  },
+  {
     name: 'custom_ai_view_snapshot',
     description:
       'An outline of what is on the screen: the links, buttons, fields, headings and '
