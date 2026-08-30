@@ -651,6 +651,42 @@ const TOOLS = [
     },
   },
   {
+    name: 'custom_ai_view_evaluate',
+    description:
+      'Run a JavaScript expression inside the previewed page and get its value back. '
+      + 'This is the way to ask about state rather than about pixels: whether a store says '
+      + 'the user is signed in, what a media query resolved to, an element\'s scrollHeight, '
+      + 'whether a fetch settled. Every other tool here describes how the page looks; only '
+      + 'this one can see what it thinks. An expression may await — promises are resolved. '
+      + 'Note that changes made this way bypass the edit ledger, so custom_ai_view_revert '
+      + 'will not undo them; prefer custom_ai_view_edit when the point is to change something.',
+    inputSchema: {
+      type: 'object',
+      required: ['expression'],
+      properties: {
+        expression: {
+          type: 'string',
+          description:
+            'A JavaScript expression, e.g. "location.pathname" or '
+            + '"matchMedia(\'(prefers-color-scheme: dark)\').matches". A body with an explicit '
+            + 'return is also accepted for anything longer than one expression.',
+        },
+        selector: {
+          type: 'string',
+          description: 'Bind this element to `el` inside the expression, e.g. "el.scrollHeight".',
+        },
+        timeoutMs: { type: 'number', description: 'Default 10000, at most 30000.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/evaluate', args);
+      const shown = typeof r.value === 'string' ? r.value : JSON.stringify(r.value, null, 2);
+      return { text: shown === undefined ? '(undefined)' : String(shown) };
+    },
+  },
+  {
     name: 'custom_ai_view_key',
     description:
       'Press a key on the previewed page: Enter to submit a form, Escape to close a modal, ' +

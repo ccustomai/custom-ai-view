@@ -1538,6 +1538,66 @@
    * `rid` is left off entirely when the panel asks, so nothing there changes.
    */
   /*
+   * Make a value safe to post.
+   *
+   * postMessage clones structurally, and structural cloning throws on a
+   * function, a DOM node, a Window, a Proxy and anything circular. The throw
+   * would happen inside toParent — that is, after the reply was already
+   * committed to — so the caller would wait out its timeout and be told the
+   * page had stopped answering, when in truth it had answered with a
+   * `<div>`. Everything is therefore flattened to something clonable first,
+   * with depth and breadth bounded so a store holding the whole application
+   * cannot be dragged across the channel either.
+   */
+  function clonable(value, depth, seen) {
+    var d = depth || 0;
+    if (value === null || value === undefined) return value === undefined ? '(undefined)' : null;
+    var t = typeof value;
+    if (t === 'string') return value.length > 20000 ? value.slice(0, 20000) + '… (' + value.length + ' chars)' : value;
+    if (t === 'number' || t === 'boolean') return value;
+    if (t === 'bigint') return String(value) + 'n';
+    if (t === 'symbol') return String(value);
+    if (t === 'function') {
+      return '(function ' + (value.name || 'anonymous') + ') ' + String(value).slice(0, 200);
+    }
+    if (value instanceof Error) return '(' + value.name + ') ' + value.message;
+    if (typeof Element !== 'undefined' && value instanceof Element) return '<' + describe(value) + '>';
+    if (typeof Node !== 'undefined' && value instanceof Node) return '(node ' + value.nodeName + ')';
+    if (value === window) return '(window)';
+    if (typeof value.then === 'function') return '(pending promise)';
+    if (d >= 4) return '(…)';
+
+    var marks = seen || [];
+    if (marks.indexOf(value) >= 0) return '(circular)';
+    marks = marks.concat([value]);
+
+    if (Array.isArray(value)) {
+      var cap = Math.min(value.length, 100);
+      var out = [];
+      for (var i = 0; i < cap; i++) out.push(clonable(value[i], d + 1, marks));
+      if (value.length > cap) out.push('… ' + (value.length - cap) + ' more');
+      return out;
+    }
+    if (typeof Map !== 'undefined' && value instanceof Map) return '(Map of ' + value.size + ')';
+    if (typeof Set !== 'undefined' && value instanceof Set) return '(Set of ' + value.size + ')';
+
+    var obj = {};
+    var keys;
+    try { keys = Object.keys(value); } catch (e) { return '(unreadable object)'; }
+    for (var k = 0; k < Math.min(keys.length, 60); k++) {
+      try { obj[keys[k]] = clonable(value[keys[k]], d + 1, marks); } catch (e) { obj[keys[k]] = '(threw on read)'; }
+    }
+    if (keys.length > 60) obj['…'] = (keys.length - 60) + ' more keys';
+    return obj;
+  }
+
+  function replyEval(rid, value) {
+    var safeValue;
+    try { safeValue = clonable(value, 0, []); } catch (e) { safeValue = '(could not be represented)'; }
+    toParent({ type: 'dp:evaluated', rid: rid, value: safeValue, kind: typeof value });
+  }
+
+  /*
    * How long the document has been still.
    *
    * "Has it finished loading" is answered by readyState on a page that loads
@@ -1884,6 +1944,61 @@
             title: document.title,
           });
         });
+        break;
+      /*
+       * Run an expression in the page.
+       *
+       * Everything else here is a projection of the presentation layer: what an
+       * element looks like, where its box is, what it says. None of it reaches
+       * the application's own state — whether a store holds a user, what a media
+       * query resolved to, whether a fetch came back. Without a way in, every
+       * question about state becomes "take another screenshot and guess", and
+       * any gap in the other tools is a dead end rather than a detour.
+       *
+       * Deliberately not inside safe(): safe() warns into a console nobody
+       * outside the frame reads and never replies, so a syntax error would be
+       * indistinguishable from a page that had stopped answering.
+       */
+      case 'dp:cmd:eval':
+        (function () {
+          try {
+            var subject = data.selector ? document.querySelector(data.selector) : null;
+            if (data.selector && !subject) {
+              toParent({
+                type: 'dp:evaluated', rid: data.rid,
+                error: 'No element matched ' + data.selector,
+              });
+              return;
+            }
+            // An expression with `await` in it needs an async function to live
+            // in — new Function makes an ordinary one, where await is a syntax
+            // error, and the message ("Unexpected identifier") points at the
+            // wrong thing entirely.
+            var Ctor = /\bawait\b/.test(data.expression)
+              ? Object.getPrototypeOf(async function () {}).constructor
+              : Function;
+            var fn = new Ctor('el', 'document', 'window',
+              /^\s*(return|var|let|const|if|for|while|throw|\{)\b/.test(data.expression)
+                ? data.expression
+                : 'return (' + data.expression + ');');
+            var value = fn(subject, document, window);
+            if (value && typeof value.then === 'function') {
+              value.then(
+                function (v) { replyEval(data.rid, v); },
+                function (e) {
+                  toParent({ type: 'dp:evaluated', rid: data.rid, error: String(e && e.message ? e.message : e) });
+                }
+              );
+              return;
+            }
+            replyEval(data.rid, value);
+          } catch (err) {
+            toParent({
+              type: 'dp:evaluated', rid: data.rid,
+              error: String(err && err.message ? err.message : err),
+            });
+          }
+        })();
         break;
       case 'dp:cmd:pointer':
         safe('pointer mode', function () {

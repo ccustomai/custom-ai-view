@@ -1688,6 +1688,24 @@ class AppHost {
           type: 'dp:cmd:tree',
           path: body.path || [],
         }, 'dp:tree'),
+
+        /*
+         * The way in to the page's own state.
+         *
+         * Everything else on this API describes the presentation — a box, a
+         * class, some text. None of it can answer "is the user signed in
+         * according to the store", "what did that media query resolve to",
+         * "did the fetch come back". Without this, every such question turns
+         * into another screenshot and a guess.
+         *
+         * A longer timeout than the rest: an expression is allowed to await
+         * something, and the ones worth writing usually do.
+         */
+        '/evaluate': async body => this.ask(body, {
+          type: 'dp:cmd:eval',
+          expression: String(body.expression || ''),
+          selector: body.selector,
+        }, 'dp:evaluated', Math.min(30000, Math.max(1000, body.timeoutMs || 10000))),
       },
     });
 
