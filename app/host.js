@@ -833,6 +833,15 @@ class AppHost {
 
     let finalUrl = url;
     if (useProxy) {
+      // Once per window, in the log, so a forgotten override is visible to the
+      // person as well as to whatever is reading /state.
+      if (!session.warnedUserAgent) {
+        const clash = this.contradictingUserAgent(session);
+        if (clash) {
+          session.warnedUserAgent = true;
+          this.log('user agent override — ' + clash.note);
+        }
+      }
       this.proxy.setProfile(this.profileFor(session));
       // Named, so every request this page then makes is filed under this window
       // rather than into one heap shared with the iPad next to it.
@@ -848,6 +857,46 @@ class AppHost {
     session.proxied = useProxy;
     this.remember(url);
     session.post({ type: 'load', url: finalUrl, real: url, proxied: useProxy, kind: 'web' });
+  }
+
+  /*
+   * A user-agent override that disagrees with the device being shown.
+   *
+   * Overriding the agent is a real need — some sites refuse to run outside their
+   * own shell, or bounce a phone to the App Store, and the only way past that is
+   * to stop claiming to be a phone. But the override is remembered, and a
+   * forgotten one is invisible: the frame still says iPhone while the site is
+   * being told it is a Windows desktop and is serving the desktop build. That
+   * looks like a site that renders badly on a phone, which is exactly the wrong
+   * conclusion.
+   *
+   * Returns a short description when the two disagree, otherwise nothing.
+   */
+  contradictingUserAgent(session) {
+    const overrides = this.settings.userAgent || {};
+    const base = byId(session.state.deviceId);
+    const osName = base.os === 'ipados' ? 'ipados'
+      : base.os === 'android' ? 'android'
+      : base.os === 'macos' ? 'macos'
+      : base.os === 'ios' ? 'ios' : 'generic';
+    const ua = overrides[osName];
+    if (!ua) return null;
+
+    const claims = /Windows NT/i.test(ua) ? 'Windows'
+      : /Macintosh|Mac OS X/i.test(ua) && osName !== 'macos' ? 'a Mac'
+      : /Android/i.test(ua) && osName !== 'android' ? 'Android'
+      : /(iPhone|iPad)/i.test(ua) && osName !== 'ios' && osName !== 'ipados' ? 'an iPhone'
+      : null;
+    if (!claims) return null;
+
+    return {
+      device: base.name,
+      claims,
+      setting: 'userAgent.' + osName,
+      note: base.name + ' is telling every site it is ' + claims + ', so the site serves the '
+        + 'build for that, not the one this device would get. Clear userAgent.' + osName
+        + ' in settings to see the real thing.',
+    };
   }
 
   profileFor(session) {
@@ -1559,6 +1608,12 @@ class AppHost {
               : null,
             captureAvailable: this.capturer.available,
             liveControl: !!this.chromePort,
+            // An override that contradicts the device on screen. A phone that
+            // tells the site it is a Windows desktop is served the desktop
+            // build, and the preview is then wrong in a way no screenshot can
+            // reveal — the frame still says iPhone. The setting is the user's to
+            // keep, so this reports it rather than removing it.
+            userAgentOverride: this.contradictingUserAgent(session) || undefined,
           };
         },
 

@@ -212,7 +212,17 @@ const TOOLS = [
     // Pass the arguments on. Dropping them meant a question about the second
     // window was answered with the first window's URL, device and selection,
     // and nothing said so.
-    run: args => call('/state', args).then(state => ({ text: JSON.stringify(state, null, 2) })),
+    run: args => call('/state', args).then(state => {
+      // Said in words, above the JSON. A phone quietly claiming to be a desktop
+      // makes the site serve the desktop build, and every later observation —
+      // the screenshot, the audit, the layout complaint — is then about a page
+      // this device would never have been given.
+      const o = state.userAgentOverride;
+      const warning = o
+        ? 'Heads up: ' + o.note + '\n\n'
+        : '';
+      return { text: warning + JSON.stringify(state, null, 2) };
+    }),
   },
   {
     name: 'custom_ai_view_devices',
