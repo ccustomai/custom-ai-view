@@ -2,7 +2,7 @@
   "name": "custom-ai-view",
   "displayName": "Custom AI View",
   "description": "A real browser inside pixel-accurate device frames — iPhone, iPad, Android, MacBook — that an AI agent can drive and see. By Custom AI.",
-  "version": "1.14.2",
+  "version": "1.15.0",
   "publisher": "customai",
   "author": "Custom AI (https://ccustom.ai)",
   "homepage": "https://ccustom.ai/view",

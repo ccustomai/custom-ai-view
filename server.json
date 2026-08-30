@@ -3,7 +3,7 @@
   "name": "io.github.ccustomai/custom-ai-view",
   "title": "Custom AI View",
   "description": "See any site as it looks on a real iPhone, iPad or MacBook — and drive that window over MCP.",
-  "version": "1.14.2",
+  "version": "1.15.0",
   "websiteUrl": "https://ccustom.ai/view",
   "repository": {
     "url": "https://github.com/ccustomai/custom-ai-view",
@@ -12,8 +12,8 @@
   "packages": [
     {
       "registryType": "mcpb",
-      "identifier": "https://github.com/ccustomai/custom-ai-view/releases/download/v1.14.2/custom-ai-view.mcpb",
-      "fileSha256": "e599f12d67e52c551f0d9007f7e333a40ec4148750b684b148226ef8eeafe370",
+      "identifier": "https://github.com/ccustomai/custom-ai-view/releases/download/v1.15.0/custom-ai-view.mcpb",
+      "fileSha256": "d514eece817d234407db03f42a100a2e36d9821f85c577055e5c76c062b5bf97",
       "transport": {
         "type": "stdio"
       }
