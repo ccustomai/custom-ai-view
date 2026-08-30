@@ -40,6 +40,21 @@ class Capturer {
     this.library = opts.library || null;
   }
 
+  /*
+   * Encoding and filing, for a caller that collected its own frames.
+   *
+   * The host records the live window itself — the headless browser here can
+   * only ever film a signed-out copy — but where the result goes, and how a GIF
+   * is assembled, should not be a second implementation.
+   */
+  encode(frames, delayMs) {
+    return encodeGif(frames, { delayMs: delayMs || 100 });
+  }
+
+  file(buffer, url, kind, name, ext) {
+    return this._file(buffer, url, kind, name, ext);
+  }
+
   /**
    * Save a capture where it belongs: filed by site in the library when there is
    * one, otherwise in the scratch folder.
@@ -273,6 +288,7 @@ class Capturer {
       opts,
       frames: 0,
       bytes: 0,
+      late: 0,
       started: Date.now(),
       stopping: false,
       warned: false,
@@ -315,9 +331,12 @@ class Capturer {
     while (!session.stopping) {
       const began = Date.now();
       try {
+        // No captureBeyondViewport. The clip is inside the viewport already, and
+        // the flag forces a full-page re-render for every single frame — it cost
+        // this loop roughly six times real time, so a five-second take produced
+        // five seconds of footage spread over thirty.
         const shot = await session.page.send('Page.captureScreenshot', {
           format: 'png',
-          captureBeyondViewport: true,
           clip: {
             x: Math.max(0, session.clip.x), y: Math.max(0, session.clip.y),
             width: Math.ceil(session.clip.width), height: Math.ceil(session.clip.height),
@@ -344,6 +363,7 @@ class Capturer {
       }
       const spent = Date.now() - began;
       if (spent < interval) await this._sleep(interval - spent);
+      else session.late++;
     }
   }
 
@@ -366,10 +386,17 @@ class Capturer {
       throw new Error('No frames were captured.');
     }
 
+    const elapsed = Date.now() - session.started;
+    const realFps = session.frames / (elapsed / 1000);
+
     this.log('encoding ' + session.frames + ' frames');
     const files = fs.readdirSync(session.dir).filter(f => f.endsWith('.png')).sort();
     const buffers = files.map(f => fs.readFileSync(path.join(session.dir, f)));
-    const gif = encodeGif(buffers, { delayMs: Math.round(1000 / session.fps) });
+    // The rate achieved, not the rate asked for. Stamping a clip faster than it
+    // was filmed plays back a different animation from the one that happened.
+    const gif = encodeGif(buffers, {
+      delayMs: Math.round(1000 / Math.min(session.fps, Math.max(1, realFps))),
+    });
 
     fs.rmSync(session.dir, { recursive: true, force: true });
 
@@ -378,7 +405,8 @@ class Capturer {
       file: this._file(gif, session.opts.url, 'recordings', session.opts.name || 'recording', '.gif'),
       frames: session.frames,
       fps: session.fps,
-      seconds: Math.round((Date.now() - session.started) / 1000),
+      realFps: Math.round(realFps * 10) / 10,
+      seconds: Math.round(elapsed / 1000),
     };
   }
 

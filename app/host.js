@@ -266,6 +266,7 @@ class AppHost {
     this.port = 0;
     this.chromeProcs = new Set();
     this.chromePort = 0;
+    this.liveRec = null;
     this.displayMetrics = null;
     this.profileDir = path.join(CONFIG_DIR, 'window-profile');
 
@@ -1274,6 +1275,186 @@ class AppHost {
   }
 
   /** Clip a photograph of the real window down to one region of the device. */
+  /*
+   * Record the window the person is looking at.
+   *
+   * Recording used to open a second, headless browser, load the page again in a
+   * clean profile and film that. So the file showed a signed-out copy of the
+   * page, at the top, without the live edits, without whatever had been typed —
+   * and it was handed over as though it were a recording of what happened. On a
+   * tool whose whole claim is that it photographs the real window, the one
+   * output that did not was the recording.
+   *
+   * Page.captureScreenshot against the open window, at the measured device
+   * frame, in the same loop the headless path uses. Screencast would push
+   * frames instead of pulling them, which is cheaper — but it delivers whatever
+   * the compositor felt like sending, at a rate nobody chose, and a clip whose
+   * timing is decided elsewhere is the problem that was just fixed.
+   */
+  async windowRecord(session, opts) {
+    const cdp = await this.attach(session);
+    const fps = Math.min(20, Math.max(2, opts.fps || 10));
+    const duration = Math.min(60000, Math.max(500, opts.durationMs || 5000));
+
+    const measured = await cdp.send('Runtime.evaluate', {
+      expression: 'Promise.resolve(window.__dpRegion("frame", ""))',
+      returnByValue: true, awaitPromise: true,
+    });
+    if (measured.exceptionDetails) throw new Error(measured.exceptionDetails.text);
+    const clip = measured.result && measured.result.value;
+    if (!clip || !clip.width) throw new Error('Could not measure the device in the window');
+
+    const frames = [];
+    const wanted = Math.round((duration / 1000) * fps);
+    const interval = 1000 / fps;
+    const started = Date.now();
+    let late = 0;
+
+    for (let i = 0; i < wanted; i++) {
+      const due = started + i * interval;
+      const shot = await cdp.send('Page.captureScreenshot', {
+        format: 'png',
+        clip: {
+          x: Math.max(0, clip.x), y: Math.max(0, clip.y),
+          width: Math.ceil(clip.width), height: Math.ceil(clip.height), scale: 1,
+        },
+      }, 20000);
+      frames.push(Buffer.from(shot.data, 'base64'));
+      const wait = due + interval - Date.now();
+      if (wait > 0) await new Promise(r => setTimeout(r, wait));
+      else late++;
+    }
+
+    const elapsed = Date.now() - started;
+    const realFps = frames.length / (elapsed / 1000);
+    if (late > wanted * 0.2) {
+      this.log('live recording fell behind on ' + late + ' of ' + wanted + ' frames — real rate '
+        + realFps.toFixed(1) + ' fps');
+    }
+    // The delay written into the file is the rate achieved, not the rate asked
+    // for: a clip stamped faster than it was filmed plays a different animation.
+    const gif = this.capturer.encode(frames, Math.round(1000 / Math.min(fps, Math.max(1, realFps))));
+    return {
+      file: this.capturer.file(gif, session.currentUrl, 'recordings', opts.name || 'recording', '.gif'),
+      frames: frames.length,
+      fps,
+      realFps: Math.round(realFps * 10) / 10,
+      elapsedMs: elapsed,
+      live: true,
+    };
+  }
+
+  /*
+   * The same, open-ended: start now, stop whenever, film the live window
+   * throughout.
+   *
+   * Frames go to disk as they arrive rather than piling up in memory — at ten
+   * frames a second a phone-sized PNG is a couple of hundred kilobytes, so a
+   * ten-minute take would be over a gigabyte held in RAM. The directory carries
+   * the prefix the abandoned-temp sweeper looks for, so a take that dies with
+   * the process is cleaned up like any other.
+   */
+  async startWindowRecording(session, opts) {
+    if (this.liveRec) throw new Error('Already recording.');
+    const cdp = await this.attach(session);
+    const fps = Math.min(20, Math.max(2, opts.fps || 10));
+
+    const measured = await cdp.send('Runtime.evaluate', {
+      expression: 'Promise.resolve(window.__dpRegion("frame", ""))',
+      returnByValue: true, awaitPromise: true,
+    });
+    if (measured.exceptionDetails) throw new Error(measured.exceptionDetails.text);
+    const clip = measured.result && measured.result.value;
+    if (!clip || !clip.width) throw new Error('Could not measure the device in the window');
+
+    const rec = {
+      cdp, fps, opts, clip,
+      url: session.currentUrl,
+      dir: fs.mkdtempSync(path.join(os.tmpdir(), 'custom-ai-view-rec-')),
+      frames: 0, bytes: 0, late: 0,
+      started: Date.now(), stopping: false, warned: false,
+    };
+    this.liveRec = rec;
+    rec.loop = this.windowRecordLoop(rec);
+    this.log('recording the window at ' + fps + ' fps into ' + rec.dir);
+    return { fps, started: rec.started, live: true };
+  }
+
+  async windowRecordLoop(rec) {
+    const interval = 1000 / rec.fps;
+    while (!rec.stopping) {
+      const began = Date.now();
+      try {
+        const shot = await rec.cdp.send('Page.captureScreenshot', {
+          format: 'png',
+          clip: {
+            x: Math.max(0, rec.clip.x), y: Math.max(0, rec.clip.y),
+            width: Math.ceil(rec.clip.width), height: Math.ceil(rec.clip.height), scale: 1,
+          },
+        }, 20000);
+        const buffer = Buffer.from(shot.data, 'base64');
+        fs.writeFileSync(path.join(rec.dir, String(rec.frames).padStart(6, '0') + '.png'), buffer);
+        rec.frames++;
+        rec.bytes += buffer.length;
+
+        // A GIF assembled from tens of thousands of frames is unusable and the
+        // encode would take longer than the recording. Say so once.
+        if (!rec.warned && rec.frames > 6000) {
+          rec.warned = true;
+          this.log('recording is very long (' + rec.frames + ' frames) — consider stopping');
+        }
+      } catch (err) {
+        // The window was closed, or navigated somewhere the debugger lost. The
+        // frames already on disk are still a real recording, so the take is not
+        // thrown away — but status must stop claiming it is still filming.
+        if (!rec.stopping) {
+          rec.broke = err.message;
+          this.log('recording ended early: ' + err.message);
+        }
+        break;
+      }
+      const spent = Date.now() - began;
+      if (spent < interval) await new Promise(r => setTimeout(r, interval - spent));
+      else rec.late++;
+    }
+  }
+
+  async stopWindowRecording() {
+    const rec = this.liveRec;
+    if (!rec) throw new Error('Nothing is being recorded.');
+    rec.stopping = true;
+    this.liveRec = null;
+    try {
+      await rec.loop;
+    } catch {
+      /* the loop already said why it ended */
+    }
+
+    if (!rec.frames) {
+      fs.rmSync(rec.dir, { recursive: true, force: true });
+      throw new Error('No frames were captured.');
+    }
+
+    const elapsed = Date.now() - rec.started;
+    const realFps = rec.frames / (elapsed / 1000);
+    this.log('encoding ' + rec.frames + ' frames');
+    const files = fs.readdirSync(rec.dir).filter(f => f.endsWith('.png')).sort();
+    const buffers = files.map(f => fs.readFileSync(path.join(rec.dir, f)));
+    // Stamped at the rate achieved, not the rate asked for: a clip that claims
+    // to be faster than it was filmed plays back a different animation.
+    const gif = this.capturer.encode(buffers, Math.round(1000 / Math.min(rec.fps, Math.max(1, realFps))));
+    fs.rmSync(rec.dir, { recursive: true, force: true });
+
+    return {
+      file: this.capturer.file(gif, rec.url, 'recordings', rec.opts.name || 'recording', '.gif'),
+      frames: rec.frames,
+      fps: rec.fps,
+      realFps: Math.round(realFps * 10) / 10,
+      seconds: Math.round(elapsed / 1000),
+      live: true,
+    };
+  }
+
   async windowShot(session, body) {
     const cdp = await this.attach(session);
     const mode = body.mode || 'frame';
@@ -1574,6 +1755,37 @@ class AppHost {
         '/record': async body => {
           const session = body.window ? this.sessions.get(body.window) : await sessionSoon();
           if (!session) throw new Error('No window is open.');
+
+          /*
+           * The open window first.
+           *
+           * The headless path opens a second browser, loads the page again in a
+           * clean profile and films that — so the file was a signed-out copy at
+           * the top of the page, without the live edits and without whatever had
+           * been typed, handed over as a recording of what happened. On a tool
+           * whose claim is that it photographs the real window, the recording
+           * was the one output that did not.
+           *
+           * It is still the fallback, for a URL or a device the open window is
+           * not showing, and the answer says which one produced the file.
+           */
+          const canUseWindow =
+            body.live !== false &&
+            this.chromePort &&
+            !body.url && !body.device && !body.orientation;
+
+          let liveFailed = '';
+          if (canUseWindow) {
+            try {
+              return await this.windowRecord(session, {
+                durationMs: body.durationMs, fps: body.fps, name: 'recording',
+              });
+            } catch (err) {
+              liveFailed = err.message;
+              this.log('could not record the window, filming a fresh copy: ' + err.message);
+            }
+          }
+
           const clip = await this.capturer.record(this.captureOptions(session, {
             durationMs: body.durationMs, fps: body.fps, name: 'recording',
           }));
@@ -1583,6 +1795,7 @@ class AppHost {
           return {
             file: clip.file, frames: clip.frames, fps: clip.fps,
             realFps: clip.realFps, elapsedMs: clip.elapsedMs,
+            live: false, liveFailed: liveFailed || undefined,
           };
         },
 
@@ -2053,15 +2266,48 @@ class AppHost {
         '/record/start': async body => {
           const session = body.window ? this.sessions.get(body.window) : this.sessions.values().next().value;
           if (!session) throw new Error('No window is open.');
-          return this.capturer.startRecording(this.captureOptions(session, body));
+
+          // One take at a time, whichever browser is filming it — otherwise stop
+          // and status answer about a recording the caller did not start.
+          if (this.liveRec || this.capturer.isRecording) throw new Error('Already recording.');
+
+          // The window itself, for the reason the fixed-length take gives.
+          let liveFailed = '';
+          if (body.live !== false && this.chromePort && !body.url && !body.device && !body.orientation) {
+            try {
+              return await this.startWindowRecording(session, body);
+            } catch (err) {
+              liveFailed = err.message;
+              this.log('could not record the window, filming a fresh copy: ' + err.message);
+            }
+          }
+          const started = await this.capturer.startRecording(this.captureOptions(session, body));
+          return Object.assign({ live: false, liveFailed: liveFailed || undefined }, started);
         },
 
         '/record/stop': async () => {
+          if (this.liveRec) return this.stopWindowRecording();
           const clip = await this.capturer.stopRecording();
-          return { file: clip.file, frames: clip.frames, fps: clip.fps, seconds: clip.seconds };
+          return {
+            file: clip.file, frames: clip.frames, fps: clip.fps,
+            seconds: clip.seconds, live: false,
+          };
         },
 
-        '/record/status': async () => this.capturer.recordingStatus(),
+        '/record/status': async () => {
+          if (this.liveRec) {
+            const rec = this.liveRec;
+            return {
+              recording: !rec.broke,
+              live: true,
+              endedEarly: rec.broke || undefined,
+              seconds: Math.round((Date.now() - rec.started) / 1000),
+              frames: rec.frames, fps: rec.fps,
+              megabytes: Math.round(rec.bytes / 1048576 * 10) / 10,
+            };
+          }
+          return this.capturer.recordingStatus();
+        },
 
         '/collect': async body => {
           const session = body.window ? this.sessions.get(body.window) : this.sessions.values().next().value;
@@ -2145,6 +2391,19 @@ class AppHost {
   }
 
   stop() {
+    // Stop the loop before the window it films goes away, and take the frames
+    // with it — an abandoned take is a directory of PNGs nobody will ever ask
+    // for, left for the sweeper to find half an hour later.
+    if (this.liveRec) {
+      const rec = this.liveRec;
+      this.liveRec = null;
+      rec.stopping = true;
+      try {
+        fs.rmSync(rec.dir, { recursive: true, force: true });
+      } catch {
+        /* the sweeper will get it */
+      }
+    }
     for (const proc of this.chromeProcs) {
       try {
         proc.kill();

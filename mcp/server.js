@@ -469,7 +469,10 @@ const TOOLS = [
     description:
       'Screen-record the device. "start" begins and runs for as long as you like — frames ' +
       'go to disk, so length is limited only by space; "stop" ends it and writes an ' +
-      'animated GIF into the site folder; "status" reports how long it has been running.',
+      'animated GIF into the site folder; "status" reports how long it has been running.\n' +
+      'This films the OPEN WINDOW, so everything done to the page between start and stop is ' +
+      'in the clip, in the user\'s own session. The answer says which browser filmed it; if it ' +
+      'says "a fresh copy", the clip is signed out and is not a record of what the user did.',
     inputSchema: {
       type: 'object',
       required: ['action'],
@@ -477,25 +480,52 @@ const TOOLS = [
         action: { type: 'string', enum: ['start', 'stop', 'status'] },
         fps: { type: 'number', description: 'Frames per second, 2 to 20. Default 10.' },
         name: { type: 'string', description: 'Name for the file.' },
+        live: {
+          type: 'boolean',
+          description: 'Set false to film a fresh, signed-out copy instead of the open window.',
+        },
         window: WINDOW_ARG,
       },
       additionalProperties: false,
     },
     run: async args => {
+      // Which browser is filming, on every answer. A signed-out re-render of a
+      // private screen is a login page, and a clip of one must never be handed
+      // over described as a recording of what the person was doing.
       if (args.action === 'start') {
         const r = await call('/record/start', args, 120000);
-        return { text: 'Recording at ' + r.fps + ' fps. Call this again with action "stop" to finish.' };
+        return {
+          text: 'Recording at ' + r.fps + ' fps'
+            + (r.live
+              ? ' — the open window, so whatever happens in it from now on is in the clip.'
+              : ' — a fresh copy, signed out, at the top of the page'
+                + (r.liveFailed ? ' (the open window could not be filmed: ' + r.liveFailed + ')' : '') + '.')
+            + ' Call this again with action "stop" to finish.',
+        };
       }
       if (args.action === 'stop') {
         const r = await call('/record/stop', {}, 600000);
+        const slow = r.realFps && r.realFps < r.fps * 0.8
+          ? ' The machine managed ' + r.realFps + ' fps, not ' + r.fps + ', so the clip is that much '
+            + 'coarser than asked for.'
+          : '';
         return {
-          text: 'Recorded ' + r.seconds + 's — ' + r.frames + ' frames at ' + r.fps + ' fps.\nSaved to ' + r.file,
+          text: 'Recorded ' + r.seconds + 's — ' + r.frames + ' frames at ' + r.fps + ' fps'
+            + (r.live ? ' from the open window' : ' from a fresh, signed-out copy') + '.'
+            + slow + '\nSaved to ' + r.file,
         };
       }
       const r = await call('/record/status', {});
+      if (r.endedEarly) {
+        return {
+          text: 'The recording stopped on its own after ' + r.frames + ' frames: ' + r.endedEarly
+            + '\nStop it to keep what was filmed.',
+        };
+      }
       return {
         text: r.recording
-          ? 'Recording: ' + r.seconds + 's, ' + r.frames + ' frames, ' + r.megabytes + ' MB so far.'
+          ? 'Recording ' + (r.live ? 'the open window' : 'a fresh copy') + ': '
+            + r.seconds + 's, ' + r.frames + ' frames, ' + r.megabytes + ' MB so far.'
           : 'Not recording.',
       };
     },
@@ -1014,12 +1044,19 @@ const TOOLS = [
     description:
       'Record the device frame for a fixed number of milliseconds and write an animated GIF. ' +
       'For an open-ended take, use custom_ai_view_record with start and stop instead. ' +
-      'Returns the file path; recordings are too large to inline.',
+      'Returns the file path; recordings are too large to inline.\n' +
+      'By default this films the OPEN WINDOW, with the user\'s session and any live edits in it. ' +
+      'Passing url, device or orientation cannot come from that window, so those film a fresh ' +
+      'copy in a throwaway profile: signed out, at the top of the page. The answer says which.',
     inputSchema: {
       type: 'object',
       properties: {
         durationMs: { type: 'number', description: 'How long to record, 500 to 30000. Default 5000.' },
         fps: { type: 'number', description: 'Frames per second, 2 to 20. Default 10.' },
+        live: {
+          type: 'boolean',
+          description: 'Set false to film a fresh, signed-out copy instead of the open window.',
+        },
         url: { type: 'string' },
         device: DEVICE_ARG,
         orientation: { type: 'string', enum: ['portrait', 'landscape'] },
@@ -1036,9 +1073,16 @@ const TOOLS = [
         ? ' The machine managed ' + r.realFps + ' fps, not ' + r.fps + ', so the clip is that much '
           + 'coarser than asked for.'
         : '';
+      // Which browser filmed it, for the same reason a screenshot says so: a
+      // signed-out re-render of a private screen is a login page, and a clip of
+      // one must not be described as a recording of what the user was doing.
+      const from = r.live
+        ? ' — the open window, with the session and any live edits in it'
+        : ' — a fresh copy, signed out, at the top of the page'
+          + (r.liveFailed ? ' (the open window could not be filmed: ' + r.liveFailed + ')' : '');
       return {
         text: 'Recorded ' + r.frames + ' frames at ' + r.fps + ' fps'
-          + (r.elapsedMs ? ' in ' + (r.elapsedMs / 1000).toFixed(1) + 's' : '') + '.'
+          + (r.elapsedMs ? ' in ' + (r.elapsedMs / 1000).toFixed(1) + 's' : '') + from + '.'
           + slow + '\nSaved to ' + r.file,
       };
     },
