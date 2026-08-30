@@ -387,6 +387,31 @@
       });
     }
 
+    /*
+     * What a page in flight looks like.
+     *
+     * Until now it looked like nothing: a white rectangle inside a carefully
+     * drawn phone, indistinguishable from a dev server that had died. Both
+     * pieces sit above the page and below the status bar and the notch,
+     * because the chrome of a real device does not vanish while a page loads.
+     */
+    var progress = el('div', 'dev-progress');
+    var loading = el('div', 'dev-loading');
+    var spin = el('div', 'dev-spin');
+    // Twelve spokes, each beginning its fade a twelfth of a turn after the one
+    // before. The light travels around a fixed ring rather than a shape
+    // rotating — which is what the platform does, and what a smooth spinner
+    // gets wrong.
+    for (var sp = 0; sp < 12; sp++) {
+      var spoke = el('i');
+      spoke.style.transform = 'rotate(' + (sp * 30) + 'deg)';
+      spoke.style.animationDelay = (-(11 - sp) / 12).toFixed(3) + 's';
+      spin.appendChild(spoke);
+    }
+    loading.appendChild(spin);
+    screen.appendChild(progress);
+    screen.appendChild(loading);
+
     if (opts.glare !== false) screen.appendChild(el('div', 'dev-glare'));
 
     body.appendChild(screen);
@@ -430,6 +455,12 @@
       root.appendChild(label);
     }
 
+    var loadTimers = [];
+    var clearLoadTimers = function () {
+      loadTimers.forEach(clearTimeout);
+      loadTimers = [];
+    };
+
     var api = {
       root: root,
       iframe: iframe,
@@ -437,6 +468,39 @@
       status: status,
       label: label,
       device: d,
+
+      /*
+       * Show that something is happening, without lying about how far along it is.
+       *
+       * There is no honest progress figure for a cross-origin page — nothing
+       * reports bytes, and inventing a number that walks to 90% and waits is
+       * the thing every bad loader does. So the bar advances on the two moments
+       * that are real, start and finish, and drifts a little in between to show
+       * it has not died.
+       *
+       * The spinner waits four hundred milliseconds. A page that arrives in
+       * eighty should not flash one: a spinner that appears and vanishes reads
+       * as a glitch, and makes a fast page feel slower than a page with nothing
+       * at all.
+       */
+      setLoading: function (on) {
+        clearLoadTimers();
+        if (on) {
+          progress.dataset.on = '1';
+          progress.style.width = '12%';
+          loadTimers.push(setTimeout(function () { progress.style.width = '38%'; }, 180));
+          loadTimers.push(setTimeout(function () { progress.style.width = '62%'; }, 700));
+          loadTimers.push(setTimeout(function () { progress.style.width = '78%'; }, 1800));
+          loadTimers.push(setTimeout(function () { loading.dataset.on = '1'; }, 400));
+          return;
+        }
+        loading.dataset.on = '0';
+        progress.style.width = '100%';
+        // Let the bar be seen reaching the end before it goes; a bar that
+        // disappears at 78% looks like a failure even when the page arrived.
+        loadTimers.push(setTimeout(function () { progress.dataset.on = '0'; }, 220));
+        loadTimers.push(setTimeout(function () { progress.style.width = '0'; }, 520));
+      },
       /** Size of the layout box after scaling, so the stage can centre it. */
       metrics: function () {
         var scale = parseFloat(root.style.getPropertyValue('--scale')) || 1;

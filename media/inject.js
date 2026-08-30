@@ -2090,6 +2090,497 @@
     });
   }
 
+  // ----------------------------------------------------------- page audit
+
+  /*
+   * Whether a person could actually use this page, at this size.
+   *
+   * Everything else here reports what an element IS — its box, its role, its text.
+   * A box decides nothing on its own: 30 × 30 is a comfortable button under a
+   * mouse and a coin toss under a thumb, and the only thing that can tell those
+   * apart is something that knows it is standing in for a 6.3-inch phone with a
+   * 62-point inset and a home indicator floating over the last 34 points of the
+   * glass. The device was measured in millimetres so that this could be concluded
+   * from it; measuring and then concluding nothing is where every other tool of
+   * this kind stops.
+   *
+   * Each verdict carries the element and the number it was reached by, and none of
+   * them is withheld. A 28-point button on a debug overlay is a fact about the
+   * page, and whether it matters is the caller's business rather than this file's.
+   */
+
+  /*
+   * Apple states its minimum in points, and on every device in the catalogue a
+   * point is a CSS pixel — the catalogue is written in CSS px, and PROFILE.dpr is
+   * what turns those into hardware pixels. Nothing here converts, deliberately: a
+   * page laid out in px is measured in the unit it was laid out in.
+   */
+  var TAP_MIN = 44;   // the contact patch of a fingertip
+  var TAP_GAP = 8;    // closer than this and one fingertip covers both
+  var TEXT_MIN = 12;  // below this nothing is readable at arm's length
+
+  var AUDIT_NODES = 12000;
+  var AUDIT_TAPS = 1500;
+  var AUDIT_WIDE = 400;
+
+  // Elements that paint something of their own, so a rectangle over one of them is
+  // content rather than a container that happens to reach the edge of the glass.
+  var REPLACED = { IMG: 1, SVG: 1, VIDEO: 1, CANVAS: 1, INPUT: 1, BUTTON: 1, SELECT: 1, TEXTAREA: 1 };
+
+  function boxOf(r) {
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+  }
+
+  function unionBox(a, b) {
+    var left = Math.min(a.left, b.left);
+    var top = Math.min(a.top, b.top);
+    var right = Math.max(a.right, b.right);
+    var bottom = Math.max(a.bottom, b.bottom);
+    return { left: left, top: top, right: right, bottom: bottom, width: right - left, height: bottom - top };
+  }
+
+  /*
+   * Where the element's own words actually sit.
+   *
+   * A header that runs edge to edge starts at y = 0 by design, and what must not
+   * be under the notch is the text inside it. Measuring the box would report every
+   * full-bleed container on the page as buried; a range over the element's own
+   * text nodes gives the line boxes instead, which is the ink a person is trying
+   * to read.
+   */
+  function inkRect(el) {
+    var box = null;
+    for (var i = 0; i < el.childNodes.length; i++) {
+      var node = el.childNodes[i];
+      if (node.nodeType !== 3 || !/\S/.test(node.nodeValue)) continue;
+      var rects;
+      try {
+        var range = document.createRange();
+        range.selectNode(node);
+        rects = range.getClientRects();
+      } catch (e) {
+        continue;
+      }
+      for (var j = 0; j < rects.length; j++) {
+        if (!rects[j].width || !rects[j].height) continue;
+        box = box ? unionBox(box, rects[j]) : boxOf(rects[j]);
+      }
+    }
+    return box;
+  }
+
+  /** Everything a finger can land on, including the things built out of a div. */
+  function tapKind(el, style, parentStyle) {
+    var role = roleOf(el);
+    if (role && CONTROL_ROLES[role]) return role;
+    if (el.tagName === 'LABEL' && el.hasAttribute('for')) return 'label';
+    if (el.hasAttribute('onclick')) return 'button';
+    /*
+     * The div a designer made clickable, which is the commonest control in a
+     * modern application and answers to none of the above: a handler added with
+     * addEventListener leaves no mark in the markup, and the pointer cursor is the
+     * only thing it does leave. cursor inherits, though, so every span inside such
+     * a div claims to be a control too — only the outermost element of a pointer
+     * subtree is the thing being tapped.
+     */
+    if (style.cursor === 'pointer' && (!parentStyle || parentStyle.cursor !== 'pointer')) {
+      return 'cursor:pointer';
+    }
+    return '';
+  }
+
+  /** Held against the glass, rather than scrolling past it. */
+  function isPinned(el) {
+    var node = el;
+    while (node && node !== document.documentElement) {
+      var pos;
+      try {
+        pos = getComputedStyle(node).position;
+      } catch (e) {
+        return false;
+      }
+      if (pos === 'fixed' || pos === 'sticky') return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  /*
+   * Does this element's width actually reach the page?
+   *
+   * A carousel is meant to be wider than the screen — the strip is 2000 points
+   * long and its container clips it — and calling that a broken layout would make
+   * the audit useless on every site with a row of cards. What matters is whether
+   * anything clips it before the viewport has to. html and body are the exception
+   * worth naming separately: overflow-x:hidden there takes away the sideways
+   * scrollbar but not the damage, and the content is still cut off.
+   */
+  function clipsHorizontally(el, vw) {
+    var node = el.parentElement;
+    while (node) {
+      var style;
+      try {
+        style = getComputedStyle(node);
+      } catch (e) {
+        return 'none';
+      }
+      if (style.overflowX && style.overflowX !== 'visible') {
+        if (node === document.body || node === document.documentElement) return 'root';
+        if (node.getBoundingClientRect().right <= vw + 1) return 'clipped';
+      }
+      node = node.parentElement;
+    }
+    return 'none';
+  }
+
+  /** The shortest distance a fingertip has to travel from one box to the other. */
+  function gapBetween(a, b) {
+    var dx = Math.max(a.left - b.right, b.left - a.right, 0);
+    var dy = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
+    if (dx > 0 && dy > 0) return Math.sqrt(dx * dx + dy * dy);
+    return Math.max(dx, dy);
+  }
+
+  /** Every finding names the element twice: as a person reads it, and as a tool takes it. */
+  function auditFinding(el, extra) {
+    var role = roleOf(el);
+    return Object.assign({
+      name: describe(el),
+      ref: refFor(el),
+      label: accessibleName(el, role),
+    }, extra);
+  }
+
+  function auditPage(req) {
+    var limit = Math.min(Math.max(parseInt(req.limit, 10) || 12, 1), 50);
+    var vw = window.innerWidth || 0;
+    var vh = window.innerHeight || 0;
+    var screenH = Number(PROFILE.height) || vh;
+    var notes = [];
+
+    /*
+     * How much of the safe area is still the page's problem.
+     *
+     * The device frame insets the iframe below the status bar unless it has been
+     * set to draw edge to edge, so on the default setting nothing in the page CAN
+     * be under the notch, and reporting that it is would be a lie with a number
+     * attached to it. The bottom is the other way round: no phone carves out a
+     * band for the home indicator — it floats over the page, and the page runs to
+     * the edge of the glass — so those points are always live.
+     *
+     * The host knows which of those settings is in force and says so. The fallback
+     * is for when nobody said, and reads the only evidence there is inside the
+     * frame: a viewport shorter than the screen means the top has been taken out
+     * already.
+     */
+    var reserved = Math.max(0, screenH - vh);
+    var told = req.safeTop !== undefined && req.safeTop !== null;
+    var safeTop = told
+      ? Math.max(0, Number(req.safeTop) || 0)
+      : reserved > 0 ? 0 : Math.max(0, Number(PROFILE.safeTop) || 0);
+    var safeBottom = req.safeBottom !== undefined && req.safeBottom !== null
+      ? Math.max(0, Number(req.safeBottom) || 0)
+      : Math.max(0, Number(PROFILE.safeBottom) || 0);
+
+    var scrollY = window.scrollY || 0;
+    var scroller = document.scrollingElement || document.documentElement;
+    var pageWidth = scroller ? scroller.scrollWidth : vw;
+    var atTop = scrollY <= 0;
+    var atBottom = scroller ? scrollY + vh >= scroller.scrollHeight - 2 : true;
+
+    var taps = [];
+    var small = [];
+    var unsafe = [];
+    var wide = [];
+    var checked = 0;
+    var capped = false;
+    var i;
+
+    /*
+     * Our own cursor override has to come off first.
+     *
+     * The finger is drawn by hiding the real pointer with *{cursor:none}, and that
+     * beats anything the page has to say — so with it installed every element in
+     * the document computes cursor:none, and every clickable div disappears from
+     * the audit. It goes back on in the finally, and nothing paints in between
+     * because nothing in here yields.
+     */
+    var hidCursor = fingerStyle;
+    if (hidCursor) hidCursor.disabled = true;
+
+    try {
+      var stack = [[document.documentElement, null]];
+      while (stack.length) {
+        if (checked >= AUDIT_NODES) {
+          capped = true;
+          break;
+        }
+        var frame = stack.pop();
+        var el = frame[0];
+        var parentStyle = frame[1];
+        checked++;
+
+        var style;
+        try {
+          style = getComputedStyle(el);
+        } catch (e) {
+          continue;
+        }
+        // A subtree that is display:none, or faded out by an ancestor, paints
+        // nothing at all — and nothing that paints nothing can be tapped, read or
+        // overflow anything.
+        if (style.display === 'none' || parseFloat(style.opacity) === 0) continue;
+
+        var kids = el.children;
+        for (var k = kids.length - 1; k >= 0; k--) {
+          // The finger, the ripple and the inspector's overlays are not part of
+          // the page and must never be audited as though they were.
+          if (kids[k].hasAttribute && kids[k].hasAttribute('data-custom-ai-view')) continue;
+          stack.push([kids[k], style]);
+        }
+
+        if (style.visibility === 'hidden' || style.visibility === 'collapse') continue;
+        var rect = el.getBoundingClientRect();
+        if (!(rect.width > 0 || rect.height > 0)) continue;
+
+        var kind = tapKind(el, style, parentStyle);
+        if (kind && !el.disabled && style.pointerEvents !== 'none' &&
+            rect.width > 0 && rect.height > 0 && taps.length < AUDIT_TAPS) {
+          taps.push({ el: el, kind: kind, rect: boxOf(rect) });
+        }
+
+        var text = ownText(el);
+        var ink = /\S/.test(text) ? inkRect(el) : null;
+
+        var fontSize = parseFloat(style.fontSize) || 0;
+        if (ink && fontSize > 0 && fontSize < TEXT_MIN) {
+          small.push({ el: el, size: fontSize, rect: ink, text: text });
+        }
+
+        /*
+         * What counts as content sitting in the inset: the element's own words, or
+         * a picture or a control. A full-screen backdrop is skipped, because a
+         * hero image is meant to run under the notch and a wrapper that fills the
+         * viewport is not something anybody is trying to read.
+         */
+        var band = ink;
+        if (!band && REPLACED[el.tagName]) {
+          var covering = rect.height >= vh * 0.8 || rect.width * rect.height >= vw * vh * 0.6;
+          if (!covering) band = boxOf(rect);
+        }
+        if (band && band.right > 0 && band.left < vw && band.bottom > 0 && band.top < vh) {
+          var overTop = safeTop > 0 ? safeTop - band.top : 0;
+          var overBottom = safeBottom > 0 ? band.bottom - (vh - safeBottom) : 0;
+          if (overTop >= 1 || overBottom >= 1) {
+            /*
+             * Content passing under the status bar is what scrolling looks like,
+             * not a defect. It is a finding when the element is held against the
+             * glass, or when the page has already run out in that direction —
+             * which is when nothing else is going to move it out from under.
+             */
+            var pinned = isPinned(el);
+            if (overTop >= 1 && (pinned || atTop)) {
+              unsafe.push({ el: el, edge: 'top', overlap: overTop, rect: band, pinned: pinned, text: text });
+            }
+            if (overBottom >= 1 && (pinned || atBottom)) {
+              unsafe.push({ el: el, edge: 'bottom', overlap: overBottom, rect: band, pinned: pinned, text: text });
+            }
+          }
+        }
+
+        if ((rect.right > vw + 1 || rect.left < -1) && wide.length < AUDIT_WIDE) {
+          wide.push({ el: el, rect: boxOf(rect) });
+        }
+      }
+    } finally {
+      if (hidCursor) hidCursor.disabled = false;
+    }
+
+    /*
+     * Which box a finger is actually aiming at.
+     *
+     * A checkbox is tapped by tapping its label, and a 12-point icon inside a
+     * 48-point anchor is tapped by tapping the anchor. Where a wrapper holds
+     * exactly one control the wrapper is the target, and measuring the control on
+     * its own reports a button nobody has to hit; where it holds several it is a
+     * container, and each control inside it is on its own.
+     */
+    var index = new Map();
+    for (i = 0; i < taps.length; i++) index.set(taps[i].el, i);
+    for (i = 0; i < taps.length; i++) {
+      var up = taps[i].el.parentElement;
+      while (up) {
+        var owner = index.get(up);
+        if (owner !== undefined) {
+          taps[i].owner = owner;
+          taps[owner].inside = (taps[owner].inside || 0) + 1;
+          break;
+        }
+        up = up.parentElement;
+      }
+    }
+
+    var targets = [];
+    for (i = 0; i < taps.length; i++) {
+      if (taps[i].inside) continue;
+      var box = taps[i].rect;
+      var named = taps[i];
+      var owns = taps[i].owner;
+      while (owns !== undefined && taps[owns].inside === 1) {
+        box = unionBox(box, taps[owns].rect);
+        named = taps[owns];
+        owns = taps[owns].owner;
+      }
+      targets.push({ el: named.el, kind: named.kind, rect: box });
+    }
+
+    var tapTargets = [];
+    var crowding = [];
+    if (!TOUCH) {
+      // 44 points is a fingertip. On something driven by a mouse the number is
+      // not wrong, it is about somebody who is not there.
+      notes.push('Tap-target and spacing checks were skipped: this device is driven by a mouse.');
+    } else {
+      for (i = 0; i < targets.length; i++) {
+        if (targets[i].rect.width >= TAP_MIN && targets[i].rect.height >= TAP_MIN) continue;
+        tapTargets.push(targets[i]);
+      }
+      tapTargets.sort(function (a, b) {
+        return Math.min(a.rect.width, a.rect.height) - Math.min(b.rect.width, b.rect.height);
+      });
+
+      /*
+       * Two targets one fingertip covers at once.
+       *
+       * A list of 48-point rows that share an edge is a list, and a list is fine:
+       * there are 24 points either side of the boundary and the thumb has
+       * somewhere to land. Two 24-point icons three points apart are a coin toss.
+       * So closeness is only a finding against a target that is already under the
+       * minimum — otherwise every table on the web comes back as a defect and the
+       * report is thrown away whole.
+       */
+      for (i = 0; i < targets.length; i++) {
+        for (var j = i + 1; j < targets.length; j++) {
+          var a = targets[i].rect;
+          var b = targets[j].rect;
+          var gap = gapBetween(a, b);
+          if (gap >= TAP_GAP) continue;
+          if (Math.min(a.width, a.height) >= TAP_MIN && Math.min(b.width, b.height) >= TAP_MIN) continue;
+          crowding.push({ a: targets[i], b: targets[j], gap: gap });
+        }
+      }
+      crowding.sort(function (x, y) { return x.gap - y.gap; });
+    }
+
+    // The offenders that reach the page, rather than the ones a carousel is
+    // holding on purpose.
+    var overflow = [];
+    for (i = 0; i < wide.length; i++) {
+      var clip = clipsHorizontally(wide[i].el, vw);
+      if (clip === 'clipped') continue;
+      overflow.push({
+        el: wide[i].el,
+        rect: wide[i].rect,
+        past: Math.max(wide[i].rect.right - vw, -wide[i].rect.left, 0),
+        cutOff: clip === 'root',
+      });
+    }
+    overflow.sort(function (x, y) { return y.past - x.past; });
+
+    small.sort(function (x, y) { return x.size - y.size; });
+    unsafe.sort(function (x, y) { return y.overlap - x.overlap; });
+
+    var round = function (n) { return Math.round(n * 10) / 10; };
+
+    /*
+     * Everything below crosses postMessage, which clones structurally: numbers,
+     * strings, booleans and plain objects only. Not one element reference goes
+     * out — a DOM node in here throws inside the reply, after the caller has
+     * already committed to waiting for it, and comes back as a page that stopped
+     * answering.
+     */
+    return {
+      url: realUrl(location.href),
+      title: document.title,
+      viewport: { width: vw, height: vh },
+      screen: { width: Number(PROFILE.width) || vw, height: screenH, dpr: Number(PROFILE.dpr) || 1 },
+      touch: TOUCH,
+      safeTop: safeTop,
+      safeBottom: safeBottom,
+      safeAreaFrom: told ? 'host' : 'inferred',
+      scrollY: Math.round(scrollY),
+      atTop: atTop,
+      atBottom: atBottom,
+      pageWidth: Math.round(pageWidth),
+      interactive: targets.length,
+      checked: checked,
+      capped: capped,
+      // What the caller is not being shown, so a bounded list never reads as a
+      // complete one.
+      counts: {
+        tapTargets: tapTargets.length,
+        safeArea: unsafe.length,
+        overflow: overflow.length,
+        smallText: small.length,
+        crowding: crowding.length,
+      },
+      tapTargets: tapTargets.slice(0, limit).map(function (t) {
+        return auditFinding(t.el, {
+          kind: t.kind,
+          width: round(t.rect.width),
+          height: round(t.rect.height),
+          x: Math.round(t.rect.left),
+          y: Math.round(t.rect.top),
+          offscreen: !intersectsViewport(t.rect),
+        });
+      }),
+      safeArea: unsafe.slice(0, limit).map(function (f) {
+        return auditFinding(f.el, {
+          edge: f.edge,
+          overlap: round(f.overlap),
+          x: Math.round(f.rect.left),
+          y: Math.round(f.rect.top),
+          width: round(f.rect.width),
+          height: round(f.rect.height),
+          pinned: f.pinned,
+          text: collapse(f.text, 60),
+        });
+      }),
+      overflow: overflow.slice(0, limit).map(function (f) {
+        return auditFinding(f.el, {
+          past: round(f.past),
+          width: round(f.rect.width),
+          right: Math.round(f.rect.right),
+          x: Math.round(f.rect.left),
+          y: Math.round(f.rect.top),
+          cutOff: f.cutOff,
+        });
+      }),
+      smallText: small.slice(0, limit).map(function (f) {
+        return auditFinding(f.el, {
+          fontSize: round(f.size),
+          x: Math.round(f.rect.left),
+          y: Math.round(f.rect.top),
+          text: collapse(f.text, 60),
+        });
+      }),
+      crowding: crowding.slice(0, limit).map(function (f) {
+        return {
+          gap: round(f.gap),
+          name: describe(f.a.el),
+          ref: refFor(f.a.el),
+          size: round(f.a.rect.width) + '×' + round(f.a.rect.height),
+          otherName: describe(f.b.el),
+          otherRef: refFor(f.b.el),
+          otherSize: round(f.b.rect.width) + '×' + round(f.b.rect.height),
+          x: Math.round(Math.min(f.a.rect.left, f.b.rect.left)),
+          y: Math.round(Math.min(f.a.rect.top, f.b.rect.top)),
+        };
+      }),
+      notes: notes,
+    };
+  }
+
   // ------------------------------------------------------- storage purge
 
   /**
@@ -2642,6 +3133,24 @@
           var result = editElement(data);
           toParent(Object.assign({ type: 'dp:edited', rid: data.rid }, result));
         });
+        break;
+      /*
+       * The audit, for the same reasons the outline is not inside safe(): a throw
+       * in a walk over somebody else's document would be swallowed into a console
+       * nobody outside the frame reads, and the caller would be told the page had
+       * stopped answering. A walk that fell over has to say so, and say where.
+       */
+      case 'dp:cmd:audit':
+        (function () {
+          try {
+            toParent(Object.assign({ type: 'dp:audit', rid: data.rid }, auditPage(data)));
+          } catch (err) {
+            toParent({
+              type: 'dp:audit', rid: data.rid,
+              error: String(err && err.message ? err.message : err),
+            });
+          }
+        })();
         break;
       case 'dp:cmd:tree':
         safe('tree', function () {

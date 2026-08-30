@@ -1667,6 +1667,63 @@ class AppHost {
         }, 'dp:found'),
 
         /*
+         * What the page offers, without spending an image to find out.
+         *
+         * Every other route here begins with a selector the caller is expected to
+         * know already, and the only way to learn one was to take a screenshot and
+         * read the pixels — an image per look, with the markup behind them left to
+         * be guessed at. This walks the page once and comes back with the parts a
+         * person can see and use, each carrying a reference that goes straight into
+         * /click, /type and /inspect.
+         *
+         * A longer wait than the usual eight seconds: the walk touches every element
+         * and measures the ones worth reporting, which on a heavy page is real work.
+         */
+        /*
+         * The judgements only this tool can make.
+         *
+         * Every rival can report an element's box. None can say whether a
+         * person could use it, because none of them know what a fingertip is
+         * or where the notch falls. The device has been measured in millimetres
+         * all along and nothing was ever concluded from it.
+         *
+         * Findings, not refusals: each is a measurement with an element beside
+         * it, and the caller decides which of them matter.
+         */
+        '/audit': async body => {
+          const session = body.window ? this.sessions.get(body.window) : await sessionSoon();
+          if (!session) throw new Error('No window is open.');
+          const found = await this.ask({ window: session.id }, {
+            type: 'dp:cmd:audit',
+            limit: body.limit,
+            only: body.only,
+          }, 'dp:audit', 20000);
+          const dev = session.device;
+          return Object.assign({}, found, {
+            device: { id: dev.id, name: dev.name, width: dev.w, height: dev.h },
+            text: auditText(found, { name: dev.name, width: dev.w, height: dev.h }),
+          });
+        },
+
+        '/snapshot': async body => {
+          const session = body.window ? this.sessions.get(body.window) : await sessionSoon();
+          if (!session) throw new Error('No window is open.');
+          const outline = await this.ask({ window: session.id }, {
+            type: 'dp:cmd:snapshot',
+            limit: body.limit,
+            viewport: body.viewport !== false,
+            text: body.text !== false,
+          }, 'dp:snapshot', 20000);
+          const dev = session.device;
+          // The mapped shape, not the raw device: the catalogue calls them w and
+          // h, the formatter reads width and height, and passing the raw object
+          // printed "iPhone 16 Pro undefined×undefined" at the top of every
+          // outline. The same mismatch has now cost this codebase twice.
+          const shown = { id: dev.id, name: dev.name, width: dev.w, height: dev.h };
+          return Object.assign({}, outline, { device: shown, text: outlineText(outline, shown) });
+        },
+
+        /*
          * Wait for the page instead of photographing it until it happens to be right.
          *
          * Polling with screenshots costs an image per attempt and still answers about
@@ -1864,6 +1921,152 @@ class AppHost {
 }
 
 // ---------------------------------------------------------------- helpers
+
+/**
+ * The outline as lines, which is the form that has to be cheap.
+ *
+ * One row per element — what it is, what it is called, and the reference to use.
+ * The reference goes last because it is the only part with spaces in it, and by
+ * then the role and the name have usually already answered the question.
+ *
+ * The footer is not decoration. An outline that quietly stopped at its limit reads
+ * exactly like a page with nothing else on it, and an agent that believes that goes
+ * looking for another way to do something it could have done in one tap.
+ */
+function outlineText(outline, device) {
+  const entries = outline.entries || [];
+  const counts = outline.counts || {};
+  const box = outline.viewportBox || {};
+  const lines = [];
+
+  const where = [outline.title ? '"' + outline.title + '"' : '', outline.url || ''].filter(Boolean);
+  lines.push('Page outline' + (where.length ? ' — ' + where.join(' — ') : ''));
+
+  const scrolled = box.pageHeight > box.h + 1
+    ? ', showing ' + Math.round(box.y) + '–' + Math.round(box.y + box.h) +
+      ' of ' + Math.round(box.pageHeight) + 'px'
+    : '';
+  lines.push(
+    (device ? device.name + ' ' + device.width + '×' + device.height + ' · ' : '') +
+    (outline.scope === 'page' ? 'the whole scrollable page' : 'what is on screen' + scrolled)
+  );
+  lines.push('');
+
+  for (const e of entries) {
+    lines.push(
+      e.role +
+      (e.name ? ' "' + e.name + '"' : '') +
+      (e.value ? ' = "' + e.value + '"' : '') +
+      (e.state && e.state.length ? ' (' + e.state.join(', ') + ')' : '') +
+      '  ' + e.ref
+    );
+  }
+  if (!entries.length) lines.push('(nothing visible to act on)');
+
+  lines.push('');
+  lines.push(entries.length + ' shown — every reference above is a selector click, type and inspect accept.');
+
+  const missing = [];
+  if (counts.dropped) {
+    missing.push(counts.dropped + ' more controls and headings that did not fit the limit of ' +
+      outline.limit + ' (raise `limit`)');
+  }
+  if (counts.text) missing.push(counts.text + ' blocks of text that did not fit');
+  if (counts.offscreen) {
+    missing.push(counts.offscreen + (outline.scope === 'page'
+      ? ' parked outside the page, where nobody can scroll to them'
+      : ' off screen — scroll, or ask again with viewport false for the whole page'));
+  }
+  if (counts.hidden) missing.push(counts.hidden + ' hidden');
+  if (counts.shadow) {
+    missing.push(counts.shadow + ' shadow root' + (counts.shadow === 1 ? '' : 's') +
+      ', whose contents no CSS selector can reach');
+  }
+  if (missing.length) lines.push('Not listed: ' + missing.join('; ') + '.');
+
+  return lines.join('\n');
+}
+
+/**
+ * The audit, as sentences rather than as a dump.
+ *
+ * The findings are already measurements; what turns them into something worth
+ * reading is saying, once per category, what the measurement means on this
+ * device. "22×22" is a number. "22×22, half the 44 pt a fingertip covers" is a
+ * verdict, and it is a verdict nothing else on the market can reach, because
+ * nothing else knows the device in millimetres.
+ */
+function auditText(found, device) {
+  const lines = [];
+  const c = found.counts || {};
+  const total = (c.tapTargets || 0) + (c.safeArea || 0) + (c.overflow || 0)
+    + (c.smallText || 0) + (c.crowding || 0);
+
+  lines.push('Device audit — ' + (found.title || 'untitled') + ' — ' + (found.url || ''));
+  lines.push(
+    (device ? device.name + ' ' + device.width + '×' + device.height + ' pt · ' : '')
+    + 'viewport ' + found.viewport.width + '×' + found.viewport.height
+    + ' · safe area ' + found.safeTop + '/' + found.safeBottom
+    + (found.safeAreaFrom === 'inferred' ? ' (inferred)' : '')
+    + ' · ' + found.interactive + ' interactive of ' + found.checked + ' elements checked'
+  );
+  lines.push('');
+
+  if (!found.touch) {
+    lines.push('This device is driven by a mouse, so the touch findings below do not apply to it.');
+    lines.push('');
+  }
+  if (!total) {
+    lines.push('Nothing to report. Every tap target clears 44 pt, nothing sits in an inset, '
+      + 'nothing runs past the viewport, and no text is under 12 px.');
+    return lines.join('\n');
+  }
+
+  const say = (rows, heading, line) => {
+    if (!rows || !rows.length) return;
+    lines.push(heading);
+    rows.forEach(f => lines.push('  ' + line(f)));
+    lines.push('');
+  };
+
+  say(found.tapTargets,
+    c.tapTargets + ' tap target' + (c.tapTargets === 1 ? '' : 's') + ' under 44 pt — the contact '
+    + 'patch of a fingertip. Below that, hitting one is luck:',
+    f => (f.label ? '"' + f.label + '" ' : '') + f.name + '  ' + f.width + '×' + f.height
+      + ' at ' + f.x + ',' + f.y + (f.offscreen ? '  (off screen)' : '')
+      + '\n      ' + f.ref);
+
+  say(found.crowding,
+    c.crowding + ' pair' + (c.crowding === 1 ? '' : 's') + ' closer together than a fingertip is '
+    + 'wide, where one tap lands on both:',
+    f => f.name + ' and ' + (f.other || 'its neighbour') + '  ' + f.gap + ' pt apart\n      ' + f.ref);
+
+  say(found.safeArea,
+    c.safeArea + ' element' + (c.safeArea === 1 ? '' : 's') + ' held in an inset — under the notch, '
+    + 'the status bar or the home indicator, where the glass is not clear:',
+    f => (f.text ? '"' + f.text + '" ' : '') + f.name + '  ' + f.overlap + ' pt into the '
+      + f.edge + (f.pinned ? ', and pinned there' : '') + '\n      ' + f.ref);
+
+  say(found.overflow,
+    c.overflow + ' element' + (c.overflow === 1 ? '' : 's') + ' running past the viewport. On a phone '
+    + 'that is a sideways scrollbar and a layout nobody meant to ship'
+    + (found.pageWidth > found.viewport.width
+      ? ' — the page is ' + found.pageWidth + ' px wide against a ' + found.viewport.width + ' px screen' : '')
+    + ':',
+    f => f.name + '  ' + f.width + ' px wide, ' + f.past + ' px past the edge'
+      + (f.cutOff ? ', and cut off' : '') + '\n      ' + f.ref);
+
+  say(found.smallText,
+    c.smallText + ' run' + (c.smallText === 1 ? '' : 's') + ' of text under 12 px, which is not '
+    + 'readable at arm\'s length on a phone:',
+    f => (f.text ? '"' + f.text + '" ' : '') + f.name + '  ' + f.fontSize + ' px\n      ' + f.ref);
+
+  if (found.capped) {
+    lines.push('More were found than are listed; raise the limit to see the rest.');
+  }
+  lines.push('Every reference above is a selector click, type and inspect accept.');
+  return lines.join('\n');
+}
 
 function readJson(req) {
   return new Promise((resolve, reject) => {

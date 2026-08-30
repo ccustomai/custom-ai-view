@@ -295,6 +295,7 @@
 
   function attachLoad(api) {
     api.iframe.addEventListener('load', function () {
+      if (api.setLoading) api.setLoading(false);
       // A frame blocked by X-Frame-Options stays on about:blank, which is
       // same-origin and therefore readable. A real cross-origin page throws.
       var blocked = false;
@@ -319,6 +320,10 @@
     if (!url) return;
     api.pendingUrl = url;
     api.setDesktopFallback(false);
+    // Before the src, not after: assigning src can fire load synchronously for
+    // something already cached, and turning the indicator on afterwards would
+    // leave it on for ever.
+    if (api.setLoading) api.setLoading(true);
     api.iframe.src = url;
   }
 

@@ -441,6 +441,81 @@
   mix-blend-mode: screen;
 }
 
+/* ------------------------------------------------------------- loading
+ *
+ * A page that has not arrived yet used to be a white rectangle inside a
+ * carefully drawn phone, which reads as a broken tool rather than as a page in
+ * flight — and is indistinguishable from a dev server that has died.
+ *
+ * Two things, both of which a real device shows. A thin progress line at the
+ * top of the screen, as Safari draws under its address bar; and, if the wait
+ * runs long, the platform's own activity indicator over a surface in the
+ * platform's own colour.
+ */
+.dev-progress {
+  position: absolute;
+  top: var(--pad-t, 0);
+  left: 0;
+  height: 2.5px;
+  width: 0;
+  z-index: 7;
+  pointer-events: none;
+  background: linear-gradient(90deg, #10b981, #34d399);
+  box-shadow: 0 0 6px rgba(16, 185, 129, .55);
+  opacity: 0;
+  transition: width .28s cubic-bezier(.2, .8, .3, 1), opacity .25s ease;
+}
+.dev-progress[data-on='1'] { opacity: 1; }
+
+.dev-loading {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--pad-t, 0);
+  bottom: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  /* iOS systemGroupedBackground. A page arriving over it looks like a page
+     arriving, not like a flash of white. */
+  background: #f2f2f7;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .22s ease, visibility 0s linear .22s;
+}
+.dev-loading[data-on='1'] { opacity: 1; visibility: visible; transition-delay: 0s; }
+/* A page that declared itself dark should not flash a light card at the reader. */
+.dev[data-sb='light'] .dev-loading { background: #000; }
+
+/*
+ * The indicator itself.
+ *
+ * Twelve tapered spokes, thirty degrees apart, each fading a twelfth of a turn
+ * after the last. It is drawn this way rather than as a spinning arc because
+ * that is what the platform does: the light travels around a fixed ring in
+ * twelve discrete steps, and a smoothly rotating substitute is the giveaway
+ * that a mockup is a mockup.
+ */
+.dev-spin {
+  position: relative;
+  width: 20px;
+  height: 20px;
+}
+.dev-spin i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 5.5px;
+  margin: -9px 0 0 -1px;
+  border-radius: 1px;
+  background: #8e8e93;
+  transform-origin: 1px 9px;
+  animation: ios-spoke 1s linear infinite;
+}
+.dev[data-sb='light'] .dev-spin i { background: #98989f; }
+@keyframes ios-spoke { 0% { opacity: 1; } 100% { opacity: .15; } }
+
 /* ------------------------------------------------------- MacBook body */
 
 /*

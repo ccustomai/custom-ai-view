@@ -696,7 +696,9 @@ class PreviewProxy {
           'cache-control': 'no-store',
         });
         res.end(body);
-        record.done(upstream.statusCode, type, body.length);
+        // The redirect, not the page we put in its place — the log is a record of what
+        // the site did, and what the site did was try to leave.
+        record.done(upstream.statusCode, type, 0);
         this.log(`page tried to leave for ${scheme}: — ${raw.slice(0, 120)}`);
         return;
       }

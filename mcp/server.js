@@ -669,6 +669,60 @@ const TOOLS = [
     },
   },
   {
+    name: 'custom_ai_view_snapshot',
+    description:
+      'An outline of what is on the screen: the links, buttons, fields, headings and '
+      + 'landmarks a person can actually see, each with a reference the other tools accept '
+      + 'as a selector. Call this FIRST, before reaching for a screenshot — it is how to '
+      + 'find out what is on a page without knowing a selector in advance, and it costs a '
+      + 'fraction of what an image costs. Invisible, off-screen and aria-hidden elements '
+      + 'are left out, because a person cannot act on them either.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        viewport: {
+          type: 'boolean',
+          description: 'Only what is on screen right now. Default true; false walks the whole page.',
+        },
+        text: { type: 'boolean', description: 'Include text content. Default true.' },
+        limit: { type: 'number', description: 'Cap the number of entries.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/snapshot', args);
+      return { text: r.text || JSON.stringify(r, null, 2) };
+    },
+  },
+  {
+    name: 'custom_ai_view_audit',
+    description:
+      'Judge the page against the physical device rather than against the DOM. Reports tap '
+      + 'targets smaller than the 44 pt a fingertip covers, targets so close together that '
+      + 'one finger lands on both, content sitting under the notch or the home indicator, '
+      + 'anything wider than the viewport (which on a phone is a sideways scrollbar and a '
+      + 'broken layout), and text too small to read at arm\'s length. These are the faults '
+      + 'a screenshot shows but nobody measures, and no other tool can find them because no '
+      + 'other tool knows the device in millimetres.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        only: {
+          type: 'string',
+          description: 'Restrict to one category: touch, spacing, safearea, overflow, or text.',
+        },
+        limit: { type: 'number', description: 'Cap the findings per category.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
+    run: async args => {
+      const r = await call('/audit', args);
+      return { text: r.text || JSON.stringify(r, null, 2) };
+    },
+  },
+  {
     name: 'custom_ai_view_hover',
     description:
       'Move the pointer onto an element without clicking. A menu that opens on hover, '
