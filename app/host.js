@@ -1602,7 +1602,18 @@ class AppHost {
             url: session.currentUrl,
             device: { id: dev.id, name: dev.name, width: dev.w, height: dev.h, dpr: dev.dpr },
             orientation: session.state.orientation,
-            proxied: true,
+            /*
+             * Whether this page is really going through the proxy — not the
+             * constant true that used to sit here.
+             *
+             * Almost everything downstream depends on it: the shim that answers
+             * find and click, the storage namespacing, the substituted metrics.
+             * When a page is loaded direct, none of that is present, and the
+             * failures read as "the page did not answer in time" while state
+             * calmly said it was proxied. A field that is always true is not a
+             * field, it is a decoration.
+             */
+            proxied: !!session.proxied,
             selection: session.selection
               ? { name: session.selection.name, selector: session.selection.selector, rect: session.selection.rect }
               : null,
@@ -1630,10 +1641,27 @@ class AppHost {
         '/devices': async body => {
           const filter = String(body.filter || '').toLowerCase();
           return {
+            /*
+             * The millimetres too, which the catalogue has always carried and
+             * this route has never handed over.
+             *
+             * The documentation promises "points, pixels, millimetres" and the
+             * whole physical-size claim rests on them — mmPerPt is what turns a
+             * 44 pt tap target into "smaller than a fingertip", and it was the
+             * one number an agent could not get. Answering with points alone,
+             * under a description that says millimetres, is the same defect as
+             * the rest of these: the tool describing itself wrongly.
+             */
             devices: DEVICES.filter(d => !filter || (d.name + ' ' + d.id).toLowerCase().includes(filter))
               .map(d => ({
-                id: d.id, name: d.name, width: d.w, height: d.h, dpr: d.dpr,
+                id: d.id, name: d.name, kind: d.kind, os: d.os, year: d.year,
+                width: d.w, height: d.h, dpr: d.dpr,
                 safeTop: d.safeTop, safeBottom: d.safeBottom, cutout: d.cutout,
+                mmPerPt: d.mmPerPt, ppi: d.ppi, bodyMm: d.bodyMm,
+                screenMm: d.mmPerPt
+                  ? { width: Math.round(d.w * d.mmPerPt * 10) / 10, height: Math.round(d.h * d.mmPerPt * 10) / 10 }
+                  : undefined,
+                bezel: d.bezel, radius: d.radius, homeButton: d.homeButton,
               })),
           };
         },
@@ -1789,7 +1817,47 @@ class AppHost {
           if (!session) throw new Error('No window is open.');
           const selector = body.selector || (session.selection && session.selection.selector);
           if (!selector) throw new Error('No selector given and nothing is selected.');
-          const el = await this.capturer.describe(this.captureOptions(session, { selector }));
+
+          /*
+           * The element in the open window, not in a fresh copy of the page.
+           *
+           * This was the last tool still answering from the headless render, and
+           * the only one that never said so. Everything it reports is exactly
+           * what a re-render gets wrong: the box of an element whose position
+           * depends on scroll, the computed styles of a component in a state
+           * that a signed-out page never reaches, the markup of a list that is
+           * empty until something loads it. It described a different document
+           * and named it as the element on screen.
+           *
+           * The page-side script has always been able to do this; the fallback
+           * stays for a window with no debugger attached, and says which it is.
+           */
+          let el = null;
+          let liveFailed = '';
+          if (body.live !== false && this.chromePort) {
+            try {
+              el = await this.ask(body, { type: 'dp:cmd:describe', selector }, 'dp:described');
+              if (el) el.live = true;
+            } catch (err) {
+              /*
+               * The page answering "there is no such element" is an answer, not
+               * a failure to reach the page. Re-rendering the whole document to
+               * ask a second time finds nothing either, and the second failure
+               * arrives as a crash in the formatter instead of the sentence the
+               * page already said. Only a transport problem is worth a retry.
+               */
+              if (/^No element matched|^Could not describe it:/.test(err.message)) throw err;
+              liveFailed = err.message;
+              this.log('inspect could not reach the window, describing a fresh copy: ' + err.message);
+            }
+          }
+          if (!el) {
+            el = await this.capturer.describe(this.captureOptions(session, { selector }));
+            el.live = false;
+            if (liveFailed) el.liveFailed = liveFailed;
+          }
+          // Whatever it came from, it must have a box before anything reads one.
+          if (!el.rect) el.rect = { x: 0, y: 0, width: 0, height: 0 };
           const styles = Object.entries(el.styles || {}).map(([k, v]) => '  ' + k + ': ' + v + ';').join('\n');
           return {
             element: el,
@@ -1799,6 +1867,14 @@ class AppHost {
               'Box: ' + Math.round(el.rect.width) + ' × ' + Math.round(el.rect.height),
               el.ancestors && el.ancestors.length ? 'Path: ' + el.ancestors.join(' > ') + ' > ' + el.name : '',
               el.text ? 'Text: ' + el.text : '',
+              // Where the description came from, for the reason every capture
+              // says it: a signed-out re-render of a private screen is a
+              // different document, and its styles and markup are not the ones
+              // on screen.
+              el.live === false
+                ? 'From: a fresh, signed-out copy of the page, not the open window'
+                  + (el.liveFailed ? ' (the window could not be reached: ' + el.liveFailed + ')' : '')
+                : '',
               '',
               styles ? 'Computed styles:\n```css\n' + el.selector + ' {\n' + styles + '\n}\n```' : '',
               '',

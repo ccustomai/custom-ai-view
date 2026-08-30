@@ -3409,17 +3409,38 @@
           toParent(report);
         });
         break;
+      /*
+       * Not wrapped in safe(). safe() catches, writes a warning into a console
+       * nobody is reading, and never replies — so the caller waits out its
+       * timeout and is told the page did not answer, which reads as a broken
+       * proxy rather than as one bad selector. An invalid selector, a detached
+       * node, a getComputedStyle on an element mid-teardown: all of them used
+       * to look like the same eight-second silence.
+       */
       case 'dp:cmd:describe':
-        safe('describe', function () {
-          var el = data.selector ? pick(data.selector) : inspector.selected;
-          if (!el) {
-            toParent({ type: 'dp:described', error: 'No element matched ' + (data.selector || '(no selection)') });
-            return;
+        try {
+          var described = data.selector ? pick(data.selector) : inspector.selected;
+          // The request id goes back on every reply. Without it the bridge
+          // cannot pair the answer with the question and waits out its timeout
+          // instead — which is how tree spent months reporting that the page
+          // had not answered while the page was answering every time.
+          if (!described) {
+            toParent({
+              type: 'dp:described', rid: data.rid,
+              error: 'No element matched ' + (data.selector || '(no selection)'),
+            });
+          } else {
+            var describedReport = elementReport(described);
+            describedReport.type = 'dp:described';
+            describedReport.rid = data.rid;
+            toParent(describedReport);
           }
-          var report = elementReport(el);
-          report.type = 'dp:described';
-          toParent(report);
-        });
+        } catch (err) {
+          toParent({
+            type: 'dp:described', rid: data.rid,
+            error: 'Could not describe it: ' + (err && err.message ? err.message : err),
+          });
+        }
         break;
       case 'dp:cmd:locate':
         safe('locate', function () {
