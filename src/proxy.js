@@ -42,6 +42,19 @@ const HAS_ZSTD = typeof zlib.zstdDecompressSync === 'function';
 /** Documents above this size are passed through unmodified rather than buffered. */
 const MAX_REWRITE_BYTES = 8 * 1024 * 1024;
 
+/*
+ * How much of the network log is kept, per window.
+ *
+ * A preview left open all afternoon makes tens of thousands of requests, and a log
+ * that remembers every one of them is a memory leak with a friendly name on it.
+ * A few hundred covers the load that went wrong and the minute around it, which is
+ * the only part anybody ever reads.
+ */
+const NETWORK_MAX = 300;
+
+/** Windows whose logs are held at once. The least recently active one is dropped. */
+const NETWORK_WINDOWS = 12;
+
 /** Response headers that stop a page from being framed, or that break under proxying. */
 const STRIP_HEADERS = new Set([
   'x-frame-options',
@@ -159,6 +172,27 @@ class PreviewProxy {
      * reload would quietly show the unedited page.
      */
     this._edits = [];
+    /**
+     * What the page asked the network for, per window: windowId -> ring of entries.
+     *
+     * This is the only place that sees it. The console shows what the page chose to
+     * print, and a page that goes blank behind a 401, waits for a fetch that never
+     * comes back, or drags in a three-megabyte hero image prints nothing at all.
+     */
+    this._network = new Map();
+    /**
+     * Per-window path tokens: windowId -> token, and back again.
+     *
+     * Every window shares this proxy, this origin and this browser profile, so at the
+     * HTTP level nothing tells a request made by the iPhone apart from the same
+     * request made by the iPad next to it — and a log that mixes two windows is a log
+     * of somebody else's page. The token is the one segment that is already opaque,
+     * already per-session, and already inherited by everything a document loads:
+     * relative URLs keep it, and the shim rebuilds cross-origin ones out of the token
+     * it was handed. Nothing in the injected shim had to change to carry it.
+     */
+    this._windowTokens = new Map();
+    this._tokenWindows = new Map();
   }
 
   get edits() {
@@ -202,6 +236,76 @@ class PreviewProxy {
    */
   bypassCache(ms) {
     this._bypassUntil = Date.now() + (ms || 8000);
+  }
+
+  // -------------------------------------------------------- network log
+
+  /**
+   * The path token that belongs to one window, minted on first use.
+   *
+   * Not capped, unlike the logs. A token is forty bytes and dropping one belonging to
+   * a window that is still open would 400 every request that window makes next —
+   * an unbounded handful of those is cheaper than breaking a live page.
+   */
+  tokenFor(windowId) {
+    if (!windowId) return this.token;
+    let token = this._windowTokens.get(windowId);
+    if (token) return token;
+    token = crypto.randomBytes(12).toString('hex');
+    this._windowTokens.set(windowId, token);
+    this._tokenWindows.set(token, windowId);
+    return token;
+  }
+
+  /**
+   * Draw a line in the log where the window went somewhere else.
+   *
+   * Clearing would have been easier and worse. The requests that explain a page are
+   * made *during* the navigation — the redirect chain it followed, the session call
+   * that 401'd on the way in — so a log wiped at the moment of navigating throws away
+   * exactly the ones worth having. The boundary says which side each request is on
+   * and keeps both.
+   */
+  markNavigation(windowId, url) {
+    this._note(windowId || '', { at: Date.now(), nav: true, url: String(url || '') });
+  }
+
+  /**
+   * The log for one window, oldest first, filtered.
+   *
+   * @param {{window?: string, failures?: boolean, url?: string, limit?: number}} opts
+   */
+  network(opts) {
+    const o = opts || {};
+    const ring = this._network.get(o.window || '') || [];
+    const needle = String(o.url || '').toLowerCase();
+    const limit = Math.min(NETWORK_MAX, Math.max(1, o.limit || 50));
+    // Boundaries survive every filter. They are what tells a failure on this page
+    // apart from the identical one three pages ago.
+    const keep = e =>
+      e.nav ||
+      ((!o.failures || e.failed || e.pending) && (!needle || e.url.toLowerCase().includes(needle)));
+
+    const matched = ring.filter(keep);
+    const requests = ring.filter(e => !e.nav);
+    return {
+      entries: matched.slice(-limit).map(e => Object.assign({}, e)),
+      matched: matched.filter(e => !e.nav).length,
+      total: requests.length,
+      failed: requests.filter(e => e.failed).length,
+      pending: requests.filter(e => e.pending).length,
+    };
+  }
+
+  /** A closed window keeps neither a log nor a token. */
+  forgetWindow(windowId) {
+    if (!windowId) return;
+    this._network.delete(windowId);
+    const token = this._windowTokens.get(windowId);
+    if (token) {
+      this._windowTokens.delete(windowId);
+      this._tokenWindows.delete(token);
+    }
   }
 
   _loadCookieNames() {
@@ -249,8 +353,12 @@ class PreviewProxy {
     this.profile = Object.assign({}, this.profile, profile || {});
   }
 
-  /** Turn a real URL into a proxied one. */
-  wrap(target) {
+  /**
+   * Turn a real URL into a proxied one. Naming a window puts everything the page then
+   * loads into that window's log, since the token is part of the path every relative
+   * URL below it inherits.
+   */
+  wrap(target, windowId) {
     let u;
     try {
       u = new URL(target);
@@ -259,7 +367,7 @@ class PreviewProxy {
     }
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return target;
     if (u.host === `127.0.0.1:${this.port}`) return target; // already proxied
-    return `${this.origin}/${this.token}/${b64.enc(u.origin)}${u.pathname}${u.search}${u.hash}`;
+    return `${this.origin}/${this.tokenFor(windowId)}/${b64.enc(u.origin)}${u.pathname}${u.search}${u.hash}`;
   }
 
   /** Turn a proxied URL back into the real one. */
@@ -276,7 +384,8 @@ class PreviewProxy {
   }
 
   isProxied(url) {
-    return typeof url === 'string' && url.startsWith(`${this.origin}/${this.token}/`);
+    if (typeof url !== 'string' || !url.startsWith(`${this.origin}/`)) return false;
+    return !!this._parsePath(url.slice(this.origin.length));
   }
 
   async start() {
@@ -337,9 +446,15 @@ class PreviewProxy {
    * keeps its original percent-encoding.
    */
   _parsePath(rawUrl) {
-    const prefix = `/${this.token}/`;
-    if (!rawUrl.startsWith(prefix)) return null;
-    const after = rawUrl.slice(prefix.length);
+    if (rawUrl.charAt(0) !== '/') return null;
+    const slash = rawUrl.indexOf('/', 1);
+    if (slash < 0) return null;
+    const token = rawUrl.slice(1, slash);
+    // Only tokens this session minted open the door. The per-window ones are as long
+    // and as random as the original, so there being several weakens nothing.
+    if (token !== this.token && !this._tokenWindows.has(token)) return null;
+    const window = this._tokenWindows.get(token) || '';
+    const after = rawUrl.slice(slash + 1);
     const cut = (() => {
       const s = after.indexOf('/');
       const q = after.indexOf('?');
@@ -351,10 +466,81 @@ class PreviewProxy {
     const key = after.slice(0, cut);
     let rest = after.slice(cut) || '/';
     if (!rest.startsWith('/')) rest = '/' + rest;
-    if (key === '__dp') return { internal: rest };
+    if (key === '__dp') return { internal: rest, token, window };
     const origin = b64.dec(key);
     if (!origin || !/^https?:\/\/[^/]+$/.test(origin)) return null;
-    return { key, origin, rest, target: origin + rest };
+    return { token, window, key, origin, rest, target: origin + rest };
+  }
+
+  /**
+   * Open a log entry, and hand back the two ways it can close.
+   *
+   * Written at the START of the request rather than the end, because the request
+   * worth seeing most is the one that never finished — and one recorded on
+   * completion is, for exactly as long as it matters, not in the log at all. It sits
+   * there as pending until it settles or the window goes away.
+   */
+  _record(windowId, method, url) {
+    const entry = {
+      at: Date.now(),
+      method: String(method || 'GET'),
+      url,
+      status: 0,
+      type: '',
+      bytes: 0,
+      ms: 0,
+      pending: true,
+      failed: false,
+    };
+    this._note(windowId || '', entry);
+
+    let settled = false;
+    const close = () => {
+      if (settled) return false;
+      settled = true;
+      entry.pending = false;
+      entry.ms = Date.now() - entry.at;
+      return true;
+    };
+    return {
+      done: (status, type, bytes) => {
+        if (!close()) return;
+        entry.status = status || 0;
+        entry.type = String(type || '').split(';')[0].trim();
+        entry.bytes = bytes || 0;
+        entry.failed = !status || status >= 400;
+      },
+      fail: err => {
+        if (!close()) return;
+        entry.failed = true;
+        entry.error = String((err && err.message) || err || 'the request did not complete');
+      },
+    };
+  }
+
+  _note(windowId, entry) {
+    let ring = this._network.get(windowId);
+    if (!ring) {
+      if (this._network.size >= NETWORK_WINDOWS) {
+        // By last activity rather than by age: a window open since breakfast is the
+        // one still being looked at, and dropping its log to make room for a window
+        // that has already been closed is the wrong way round.
+        let stalest = null;
+        let quietest = Infinity;
+        for (const [id, list] of this._network) {
+          const last = list.length ? list[list.length - 1].at : 0;
+          if (last < quietest) {
+            quietest = last;
+            stalest = id;
+          }
+        }
+        if (stalest !== null) this._network.delete(stalest);
+      }
+      ring = [];
+      this._network.set(windowId, ring);
+    }
+    ring.push(entry);
+    if (ring.length > NETWORK_MAX) ring.splice(0, ring.length - NETWORK_MAX);
   }
 
   /**
@@ -427,7 +613,9 @@ class PreviewProxy {
           const refUrl = new URL(ref);
           const refParsed = this._parsePath(refUrl.pathname + refUrl.search);
           if (refParsed && refParsed.key) {
-            res.writeHead(302, { location: `/${this.token}/${refParsed.key}${req.url}` });
+            // The referring document's own token, so the recovered request stays in
+            // the window that made it rather than falling out of every log.
+            res.writeHead(302, { location: `/${refParsed.token}/${refParsed.key}${req.url}` });
             return void res.end();
           }
         } catch { /* fall through */ }
@@ -444,28 +632,37 @@ class PreviewProxy {
     const secure = target.protocol === 'https:';
     const mod = secure ? https : http;
     const headers = this._upstreamHeaders(req, target);
+    const record = this._record(parsed.window, req.method, target.href);
 
-    const upstream = await new Promise((resolve, reject) => {
-      const r = mod.request(
-        {
-          protocol: target.protocol,
-          host: target.hostname,
-          port: target.port || (secure ? 443 : 80),
-          method: req.method,
-          path: target.pathname + target.search,
-          headers,
-          servername: target.hostname,
-          // Local dev servers routinely use self-signed certificates. Public hosts
-          // keep full validation.
-          rejectUnauthorized: !isPrivateHost(target.hostname),
-        },
-        resolve
-      );
-      r.on('error', reject);
-      r.setTimeout(45000, () => r.destroy(new Error('upstream timed out')));
-      if (req.method === 'GET' || req.method === 'HEAD') r.end();
-      else req.pipe(r);
-    });
+    let upstream;
+    try {
+      upstream = await new Promise((resolve, reject) => {
+        const r = mod.request(
+          {
+            protocol: target.protocol,
+            host: target.hostname,
+            port: target.port || (secure ? 443 : 80),
+            method: req.method,
+            path: target.pathname + target.search,
+            headers,
+            servername: target.hostname,
+            // Local dev servers routinely use self-signed certificates. Public hosts
+            // keep full validation.
+            rejectUnauthorized: !isPrivateHost(target.hostname),
+          },
+          resolve
+        );
+        r.on('error', reject);
+        r.setTimeout(45000, () => r.destroy(new Error('upstream timed out')));
+        if (req.method === 'GET' || req.method === 'HEAD') r.end();
+        else req.pipe(r);
+      });
+    } catch (err) {
+      // DNS, refused connection, the 45-second timeout above. The caller's own
+      // handler turns this into a 502; the log is where it stops being invisible.
+      record.fail(err);
+      throw err;
+    }
 
     const outHeaders = this._downstreamHeaders(upstream.headers, parsed, target);
     const type = String(upstream.headers['content-type'] || '');
@@ -499,6 +696,7 @@ class PreviewProxy {
           'cache-control': 'no-store',
         });
         res.end(body);
+        record.done(upstream.statusCode, type, body.length);
         this.log(`page tried to leave for ${scheme}: — ${raw.slice(0, 120)}`);
         return;
       }
@@ -507,11 +705,31 @@ class PreviewProxy {
     if ((!isHtml && !isCss) || isRedirect || req.method === 'HEAD' || length > MAX_REWRITE_BYTES) {
       res.writeHead(upstream.statusCode, outHeaders);
       upstream.pipe(res);
-      upstream.on('error', () => res.destroy());
+      /*
+       * Counted off the wire rather than trusted from content-length, which a chunked
+       * response does not send at all — and the responses whose size is the whole
+       * story, the image and the unbundled dev-server payload, are exactly the ones
+       * most likely to arrive chunked. The listener goes on after pipe(): both run in
+       * this tick, and a 'data' event cannot be emitted before the next one.
+       */
+      let bytes = 0;
+      upstream.on('data', c => { bytes += c.length; });
+      upstream.on('end', () => record.done(upstream.statusCode, type, bytes));
+      upstream.on('close', () => record.done(upstream.statusCode, type, bytes));
+      upstream.on('error', err => {
+        record.fail(err);
+        res.destroy();
+      });
       return;
     }
 
-    const raw = await readAll(upstream);
+    let raw;
+    try {
+      raw = await readAll(upstream);
+    } catch (err) {
+      record.fail(err);
+      throw err;
+    }
     let body;
     try {
       body = decompress(raw, upstream.headers['content-encoding']);
@@ -528,6 +746,9 @@ class PreviewProxy {
     if (isHtml) outHeaders['cache-control'] = 'no-store';
     res.writeHead(upstream.statusCode, outHeaders);
     res.end(body);
+    // What came off the wire, not what was served: the shim and the CSS rewrite are
+    // this tool's weight, and putting them on the page's bill would be a lie.
+    record.done(upstream.statusCode, type, raw.length);
   }
 
   get insets() {
@@ -612,7 +833,7 @@ class PreviewProxy {
       if (STRIP_HEADERS.has(key)) continue;
       if (key === 'permissions-policy') continue; // can block iframe features outright
       if (key === 'location') {
-        out.location = this._wrapRelative(v, target);
+        out.location = this._wrapRelative(v, target, parsed.window);
         continue;
       }
       if (key === 'set-cookie') {
@@ -623,7 +844,7 @@ class PreviewProxy {
         // preload/prefetch hints pointing at the real origin would escape the proxy
         const list = Array.isArray(v) ? v : [v];
         out.link = list.map(item =>
-          item.replace(/<([^>]+)>/g, (m, href) => `<${this._wrapRelative(href, target)}>`)
+          item.replace(/<([^>]+)>/g, (m, href) => `<${this._wrapRelative(href, target, parsed.window)}>`)
         );
         continue;
       }
@@ -724,12 +945,12 @@ class PreviewProxy {
       '<code>' + escape(url) + '</code></div>';
   }
 
-  _wrapRelative(value, base) {
+  _wrapRelative(value, base, windowId) {
     if (!value) return value;
     try {
       const abs = new URL(value, base);
       if (abs.protocol !== 'http:' && abs.protocol !== 'https:') return value;
-      return this.wrap(abs.href);
+      return this.wrap(abs.href, windowId);
     } catch {
       return value;
     }
@@ -748,7 +969,10 @@ class PreviewProxy {
     }
 
     let s = buf.toString('latin1');
-    const prefix = `/${this.token}/${parsed.key}`;
+    // The window's own token, not the proxy's: every relative URL in the document
+    // resolves against this prefix, which is how a subresource ends up in the log of
+    // the window that asked for it without the page or the shim knowing anything.
+    const prefix = `/${parsed.token}/${parsed.key}`;
 
     const hasViewport = /<meta[^>]+name\s*=\s*["']?viewport/i.test(s);
 
@@ -792,7 +1016,7 @@ class PreviewProxy {
 
     const boot =
       `<script>window.__DEVICE_PREVIEW__=${JSON.stringify({
-        token: this.token,
+        token: parsed.token,
         key: parsed.key,
         origin: target.origin,
         proxy: this.origin,
@@ -800,7 +1024,7 @@ class PreviewProxy {
         hasViewport,
         edits: this._edits,
       })};</script>` +
-      `<script src="/${this.token}/__dp/inject.js"></script>`;
+      `<script src="/${parsed.token}/__dp/inject.js"></script>`;
 
     const viewportMeta =
       !hasViewport && this.profile.forceViewport
@@ -839,6 +1063,14 @@ class PreviewProxy {
     headers.connection = 'Upgrade';
     headers.upgrade = req.headers.upgrade || 'websocket';
 
+    /*
+     * Logged like any other request, and settled at the handshake rather than at
+     * close: a socket that lives for an hour has no meaningful duration, and the only
+     * question anyone asks of it is whether it ever came up. "The hot reload stopped
+     * working" is that question.
+     */
+    const record = this._record(parsed.window, 'WS', target.href);
+
     const r = mod.request({
       protocol: target.protocol,
       host: target.hostname,
@@ -850,6 +1082,7 @@ class PreviewProxy {
     });
 
     r.on('upgrade', (upRes, upSocket, upHead) => {
+      record.done(upRes.statusCode, 'websocket', 0);
       const lines = [`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage}`];
       for (const [k, v] of Object.entries(upRes.headers)) {
         for (const item of Array.isArray(v) ? v : [v]) lines.push(`${k}: ${item}`);
@@ -865,7 +1098,21 @@ class PreviewProxy {
       upSocket.on('error', kill);
       socket.on('error', kill);
     });
-    r.on('error', () => socket.destroy());
+    r.on('error', err => {
+      record.fail(err);
+      socket.destroy();
+    });
+    /*
+     * A server that answers an upgrade with an ordinary response has refused it, and
+     * says so nowhere else — the socket simply never opens and the page never reloads
+     * itself again. Drained by hand because that is what node did for us while nothing
+     * was listening for 'response'; with a listener attached it stops dumping the body
+     * and the upstream socket would be held open for nothing.
+     */
+    r.on('response', up => {
+      up.resume();
+      record.fail(new Error('the server refused the upgrade with ' + up.statusCode));
+    });
     if (head && head.length) r.write(head);
     r.end();
   }

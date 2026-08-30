@@ -834,7 +834,18 @@ const TOOLS = [
     },
     run: async args => {
       const r = await call('/record', args, 180000);
-      return { text: 'Recorded ' + r.frames + ' frames at ' + r.fps + ' fps.\nSaved to ' + r.file };
+      // The rate it actually managed, when that differs from the rate asked
+      // for. A clip stamped with a speed it was never captured at plays back a
+      // different animation from the one that happened.
+      const slow = r.realFps && r.realFps < r.fps * 0.8
+        ? ' The machine managed ' + r.realFps + ' fps, not ' + r.fps + ', so the clip is that much '
+          + 'coarser than asked for.'
+        : '';
+      return {
+        text: 'Recorded ' + r.frames + ' frames at ' + r.fps + ' fps'
+          + (r.elapsedMs ? ' in ' + (r.elapsedMs / 1000).toFixed(1) + 's' : '') + '.'
+          + slow + '\nSaved to ' + r.file,
+      };
     },
   },
   {

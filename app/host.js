@@ -176,6 +176,14 @@ class Session {
     this.backlog = [];
     this.currentUrl = '';
     /*
+     * Whether the page is going through the proxy.
+     *
+     * Only the proxy sees the traffic, so with touch emulation off the network log is
+     * empty for a reason that has nothing to do with the page. Saying which it is
+     * beats letting a caller read "no requests" as "the page asked for nothing".
+     */
+    this.proxied = false;
+    /*
      * Resolves once the window has loaded and taken its first URL.
      *
      * Opening a window is not instant — Chrome has to start, the shell has to
@@ -476,6 +484,9 @@ class AppHost {
   reapSession(session) {
     if (session.clients.size) return;
     this.sessions.delete(session.id);
+    // Its network log and its proxy token go with it. The proxy has no other way of
+    // learning a window is gone, and nothing will ever ask for either again.
+    this.proxy.forgetWindow(session.id);
     this.log('window ' + session.id + ' closed (' + this.sessions.size + ' left)');
     if (!this.sessions.size) {
       this.log('last window closed, shutting down');
@@ -779,8 +790,13 @@ class AppHost {
     const url = this.normalize(input);
     if (!url) return;
 
+    // Before anything is fetched, so the log reads in the order things happened and
+    // the document request for the new page lands on the new side of the line.
+    this.proxy.markNavigation(session.id, url);
+
     if (!/^https?:/i.test(url)) {
       session.currentUrl = url;
+      session.proxied = false;
       session.post({ type: 'load', url, real: url, proxied: false, kind: 'other' });
       return;
     }
@@ -804,7 +820,9 @@ class AppHost {
     let finalUrl = url;
     if (useProxy) {
       this.proxy.setProfile(this.profileFor(session));
-      finalUrl = this.proxy.wrap(url);
+      // Named, so every request this page then makes is filed under this window
+      // rather than into one heap shared with the iPad next to it.
+      finalUrl = this.proxy.wrap(url, session.id);
       if (reason) this.log('proxying ' + url + ' — ' + reason);
     }
 
@@ -813,6 +831,7 @@ class AppHost {
     }
 
     session.currentUrl = url;
+    session.proxied = useProxy;
     this.remember(url);
     session.post({ type: 'load', url: finalUrl, real: url, proxied: useProxy, kind: 'web' });
   }
@@ -1529,7 +1548,13 @@ class AppHost {
           const clip = await this.capturer.record(this.captureOptions(session, {
             durationMs: body.durationMs, fps: body.fps, name: 'recording',
           }));
-          return { file: clip.file, frames: clip.frames, fps: clip.fps };
+          // The rate actually achieved travels with the file. A clip captured
+          // slower than it was asked for plays back a different animation from
+          // the one that happened, and only these numbers show it.
+          return {
+            file: clip.file, frames: clip.frames, fps: clip.fps,
+            realFps: clip.realFps, elapsedMs: clip.elapsedMs,
+          };
         },
 
         '/console': async body => {
@@ -1537,6 +1562,32 @@ class AppHost {
           if (!session) return { entries: [] };
           const limit = Math.min(400, Math.max(1, body.limit || 50));
           return { entries: session.consoleLog.slice(-limit) };
+        },
+
+        /*
+         * What the page actually asked the network for.
+         *
+         * The console is what the page chose to say about itself, and a page that goes
+         * white behind a 401, hangs on a fetch that never returns, or drags in a
+         * three-megabyte image says nothing about any of it. The proxy carried every
+         * one of those bytes and, until now, remembered none of them — so the only way
+         * to see them was to be sitting in front of the window with DevTools open,
+         * which is exactly what an agent cannot do.
+         */
+        '/network': async body => {
+          const session = body.window ? this.sessions.get(body.window) : await sessionSoon();
+          if (!session) return { entries: [], total: 0, failed: 0, pending: 0, proxied: false };
+          return Object.assign(
+            this.proxy.network({
+              window: session.id,
+              failures: body.failures === true,
+              url: body.url,
+              limit: body.limit,
+            }),
+            // Nothing is recorded for a page the proxy is not carrying, and "no
+            // requests" would otherwise read as "the page made none".
+            { proxied: !!session.proxied, url: session.currentUrl }
+          );
         },
 
         // Real input and real edits in the real window, so an agent can drive and

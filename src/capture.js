@@ -434,11 +434,27 @@ class Capturer {
       const wanted = Math.round((duration / 1000) * fps);
       const interval = 1000 / fps;
 
+      /*
+       * captureBeyondViewport is not set here, and that is the whole difference
+       * between a recording and a slideshow.
+       *
+       * It forces a full-page re-render for every frame, which cost about a
+       * second each. Twenty-five frames of a five-second clip therefore took
+       * thirty seconds to collect — and the frames were then played back at the
+       * requested rate, so five seconds of animation was sampled over thirty
+       * and shown as though it had happened in five. The result was not slow;
+       * it was wrong. Anything that moved was recorded at a sixth of its speed
+       * and replayed at full speed, which is a different animation.
+       *
+       * The viewport was already resized to the frame above, so there is
+       * nothing beyond it to capture.
+       */
+      const started = Date.now();
+      let late = 0;
       for (let i = 0; i < wanted; i++) {
-        const started = Date.now();
+        const due = started + i * interval;
         const shot = await page.send('Page.captureScreenshot', {
           format: 'png',
-          captureBeyondViewport: true,
           clip: {
             x: Math.max(0, clip.x), y: Math.max(0, clip.y),
             width: Math.ceil(clip.width), height: Math.ceil(clip.height),
@@ -446,17 +462,32 @@ class Capturer {
           },
         }, 30000);
         frames.push(Buffer.from(shot.data, 'base64'));
-        const spent = Date.now() - started;
-        if (spent < interval) await this._sleep(interval - spent);
+        const wait = due + interval - Date.now();
+        if (wait > 0) await this._sleep(wait);
+        else late++;
       }
 
-      this.log(`recorded ${frames.length} frames, encoding gif`);
-      const gif = encodeGif(frames, { delayMs: Math.round(1000 / fps) });
+      // If frames could not be taken as fast as they were asked for, the
+      // playback rate is a fiction. Say so rather than letting the file imply a
+      // speed it was never recorded at.
+      const elapsed = Date.now() - started;
+      const realFps = frames.length / (elapsed / 1000);
+      if (late > wanted * 0.2) {
+        this.log('recording fell behind on ' + late + ' of ' + wanted + ' frames — real rate '
+          + realFps.toFixed(1) + ' fps, not ' + fps);
+      }
+
+      this.log(`recorded ${frames.length} frames in ${elapsed}ms, encoding gif`);
+      // The delay is what actually happened, not what was asked for: a GIF
+      // stamped 10 fps that was captured at 2 plays back six times too fast.
+      const gif = encodeGif(frames, { delayMs: Math.round(1000 / Math.min(fps, Math.max(1, realFps))) });
       return {
         buffer: gif,
         file: this._file(gif, opts.url, 'recordings', opts.name || 'recording', '.gif'),
         frames: frames.length,
         fps,
+        realFps: Math.round(realFps * 10) / 10,
+        elapsedMs: elapsed,
       };
     } finally {
       await this.browser.closePage(page);

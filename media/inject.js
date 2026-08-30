@@ -1301,16 +1301,24 @@
   function isReallyVisible(el, r) {
     if (!(r.width > 0 && r.height > 0)) return false;
     if (!intersectsViewport(r)) return false;
+    return !hiddenByStyle(el);
+  }
+
+  /**
+   * The half of "can it be seen" that needs no geometry, so it can also be asked
+   * about an element that is off screen rather than hidden.
+   */
+  function hiddenByStyle(el) {
     var style;
     try {
       style = getComputedStyle(el);
     } catch (e) {
-      return true;
+      return false;
     }
-    if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
-    if (style.display === 'none') return false;
-    if (parseFloat(style.opacity) === 0) return false;
-    return true;
+    if (style.visibility === 'hidden' || style.visibility === 'collapse') return true;
+    if (style.display === 'none') return true;
+    if (parseFloat(style.opacity) === 0) return true;
+    return false;
   }
 
   /** Apply a change and report what it replaced, so it can be reasoned about. */
@@ -1459,6 +1467,437 @@
       else document.addEventListener('DOMContentLoaded', start);
     }
   });
+
+  // ---------------------------------------------------------- page outline
+
+  /*
+   * What is on the page, for something that cannot look at it.
+   *
+   * Every other tool here wants the answer before it will take the question: find,
+   * click, type and inspect all begin with a selector. Working out what those
+   * selectors are meant photographing the page and reading the pixels — an image
+   * per look, and a guess at the markup behind them. This walks the document once
+   * and reports the parts a person can see and use: what each one is, what it is
+   * called, and an address the other tools take verbatim.
+   *
+   * Being small is the feature, not a compromise. A dump of every node is what makes
+   * the other snapshots unusable — they cost more of the context window than the
+   * screenshot they replaced, and the one row worth reading is buried under four
+   * hundred wrappers. So: nothing invisible, nothing that cannot be used or read, a
+   * hard cap, and a count of what the cap threw away. A silent truncation is how an
+   * agent concludes a button does not exist.
+   */
+
+  var OUTLINE_PRUNE = {
+    SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, HEAD: 1, LINK: 1, META: 1, TITLE: 1,
+    // An <option> is not something a finger can reach — the <select> is, and it
+    // carries its options with it. An icon drawn as forty <path> elements is forty
+    // rows of nothing.
+    OPTION: 1, OPTGROUP: 1, SVG: 1, CANVAS: 1,
+  };
+
+  var TAG_ROLES = {
+    A: 'link', BUTTON: 'button', SELECT: 'combobox', TEXTAREA: 'textbox', SUMMARY: 'summary',
+    IMG: 'image', IFRAME: 'frame', VIDEO: 'video', AUDIO: 'audio', DIALOG: 'dialog',
+    NAV: 'navigation', MAIN: 'main', HEADER: 'banner', FOOTER: 'contentinfo',
+    ASIDE: 'complementary', FORM: 'form', SEARCH: 'search',
+  };
+
+  var INPUT_ROLES = {
+    checkbox: 'checkbox', radio: 'radio', range: 'slider', file: 'file', color: 'color',
+    submit: 'button', button: 'button', reset: 'button', image: 'button', search: 'searchbox',
+  };
+
+  /*
+   * Worth a row even with no name: an unnamed control is still something an agent
+   * can tap, and it is usually a bug worth seeing rather than a row worth hiding.
+   */
+  var CONTROL_ROLES = {
+    link: 1, button: 1, checkbox: 1, radio: 1, switch: 1, tab: 1, textbox: 1, searchbox: 1,
+    combobox: 1, listbox: 1, slider: 1, spinbutton: 1, file: 1, color: 1, summary: 1,
+    menuitem: 1, menuitemcheckbox: 1, menuitemradio: 1, treeitem: 1, focusable: 1,
+  };
+
+  /*
+   * Structure and the things that are neither a control nor prose. A handful per
+   * page, and they are what says which of the four boxes called "Search" is the one
+   * in the header.
+   */
+  var STRUCTURE_ROLES = {
+    navigation: 1, main: 1, banner: 1, contentinfo: 1, complementary: 1, form: 1,
+    search: 1, region: 1, dialog: 1, alert: 1, status: 1, tablist: 1, menu: 1, list: 1,
+    image: 1, frame: 1, video: 1, audio: 1,
+  };
+
+  var HEADING_ROLE = /^h[1-6]$/;
+
+  // Deep enough for any real page; a guard against a document that never ends.
+  var OUTLINE_SCAN_CAP = 4000;
+
+  function collapse(text, cap) {
+    var out = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+    return out.length > cap ? out.slice(0, cap - 1) + '…' : out;
+  }
+
+  /** The text an element owns, as opposed to the text of everything inside it. */
+  function ownText(el) {
+    var out = '';
+    for (var i = 0; i < el.childNodes.length; i++) {
+      if (el.childNodes[i].nodeType === 3) out += el.childNodes[i].nodeValue;
+    }
+    return out;
+  }
+
+  /**
+   * display:none and content-visibility:hidden — the part of "hidden" that a child
+   * cannot undo, which is what makes it safe to skip the whole subtree.
+   */
+  function notRendered(el) {
+    if (el.checkVisibility) return !el.checkVisibility();
+    try {
+      return getComputedStyle(el).display === 'none';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /*
+   * Faded out by something above it.
+   *
+   * An element's own opacity is 1 while the sheet it sits in is halfway through its
+   * fade, so asking it directly gets "perfectly visible" about something nobody can
+   * see — the same class of lie as the carousel's spare copy parked off the left
+   * edge. checkVisibility can see the ancestors. Its option names were standardised
+   * after Chrome shipped the first pair, so both spellings go in and the browser
+   * reads whichever it knows.
+   */
+  function fadedOut(el) {
+    if (!el.checkVisibility) return false;
+    return !el.checkVisibility({
+      opacityProperty: true, visibilityProperty: true,
+      checkOpacity: true, checkVisibilityCSS: true,
+    });
+  }
+
+  /*
+   * Inside the page, as opposed to parked outside it. Used when the whole scrollable
+   * document is being outlined, where "on screen" is not the question — but a
+   * carousel's duplicate slide at x = -1925 and a drawer that lives one screen off
+   * the right edge are still nothing a person will ever scroll to.
+   */
+  function intersectsDocument(r) {
+    var doc = document.documentElement;
+    var w = Math.max(doc ? doc.scrollWidth : 0, window.innerWidth || 0);
+    var h = Math.max(doc ? doc.scrollHeight : 0, window.innerHeight || 0);
+    var left = r.left + (window.scrollX || 0);
+    var top = r.top + (window.scrollY || 0);
+    return left + r.width > 0 && top + r.height > 0 && left < w && top < h;
+  }
+
+  function roleOf(el) {
+    var explicit = (el.getAttribute('role') || '').trim().toLowerCase().split(/\s+/)[0];
+    // A page that says "this is decoration" is telling the truth about itself.
+    if (explicit === 'presentation' || explicit === 'none') return '';
+    if (explicit === 'heading') return 'h' + (parseInt(el.getAttribute('aria-level'), 10) || 2);
+    if (explicit) return explicit;
+
+    var tag = el.tagName;
+    if (HEADING_ROLE.test(tag.toLowerCase())) return tag.toLowerCase();
+    if (tag === 'INPUT') {
+      var type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (type === 'hidden') return '';
+      return INPUT_ROLES[type] || 'textbox';
+    }
+    // An anchor with no href is not a link; it is a bookmark target.
+    if (tag === 'A') return el.hasAttribute('href') ? 'link' : '';
+    var editable = el.getAttribute('contenteditable');
+    if (editable === '' || editable === 'true') return 'textbox';
+    if (TAG_ROLES[tag]) return TAG_ROLES[tag];
+    if (el.getAttribute('aria-label') || el.getAttribute('aria-labelledby')) return 'region';
+    /*
+     * A div with a tabindex is a button somebody built out of a div. It answers to a
+     * tap and to Enter, and without this it is invisible to everything here — which
+     * on an older application is most of the interface.
+     */
+    var tabindex = el.getAttribute('tabindex');
+    if (tabindex !== null && parseInt(tabindex, 10) >= 0) return 'focusable';
+    return '';
+  }
+
+  function kindOf(role) {
+    if (!role) return '';
+    if (HEADING_ROLE.test(role) || CONTROL_ROLES[role]) return 'control';
+    if (STRUCTURE_ROLES[role]) return 'structure';
+    return '';
+  }
+
+  /*
+   * The name a screen reader would read out, near enough.
+   *
+   * The real algorithm is a specification of its own; this is the part of it that
+   * decides what a person calls the thing, in the order the browser resolves it.
+   * Being wrong in the cheap direction — falling back to textContent on a wrapper —
+   * is how an outline ends up quoting the entire page as the name of one <div>, so
+   * text is only ever taken from something that is itself a control or a heading.
+   */
+  function accessibleName(el, role) {
+    var label = el.getAttribute('aria-label');
+    if (label && label.trim()) return collapse(label, 80);
+
+    var by = el.getAttribute('aria-labelledby');
+    if (by) {
+      var joined = by.trim().split(/\s+/).map(function (id) {
+        var target = document.getElementById(id);
+        return target ? target.textContent : '';
+      }).join(' ');
+      if (joined.trim()) return collapse(joined, 80);
+    }
+
+    var tag = el.tagName;
+    if (tag === 'IMG') return collapse(el.getAttribute('alt') || el.getAttribute('title') || '', 80);
+
+    // The <label> the browser itself associates, which covers both for="" and
+    // wrapping — guessing at either got the wrong one often enough to matter.
+    if (el.labels && el.labels.length) {
+      var associated = collapse(el.labels[0].textContent, 80);
+      if (associated) return associated;
+    }
+
+    if (tag === 'INPUT' || tag === 'TEXTAREA') {
+      var placeholder = el.getAttribute('placeholder') || el.getAttribute('title') || '';
+      if (placeholder.trim()) return collapse(placeholder, 80);
+      var type = (el.getAttribute('type') || '').toLowerCase();
+      if (type === 'submit' || type === 'button' || type === 'reset') return collapse(el.value, 80);
+      return '';
+    }
+
+    if (role && (HEADING_ROLE.test(role) || CONTROL_ROLES[role])) {
+      var spoken = collapse(el.textContent, 80);
+      if (spoken) return spoken;
+    }
+
+    var title = el.getAttribute('title');
+    return title && title.trim() ? collapse(title, 80) : '';
+  }
+
+  /** What the control is currently holding, and what a person can tell about it. */
+  function outlineValue(el, role) {
+    var tag = el.tagName;
+    if (tag === 'SELECT') {
+      var chosen = el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+      return chosen ? collapse(chosen.textContent, 40) : '';
+    }
+    if (tag === 'INPUT' || tag === 'TEXTAREA') {
+      // Never the value of a password field. It goes to a log file and to a model.
+      if ((el.getAttribute('type') || '').toLowerCase() === 'password') return el.value ? '••••' : '';
+      if (role === 'checkbox' || role === 'radio' || role === 'file') return '';
+      return collapse(el.value, 40);
+    }
+    if (el.isContentEditable) return collapse(ownText(el), 40);
+    // An unnamed link is only identifiable by where it goes, and it costs nothing
+    // to say so for the handful of them that exist.
+    if (role === 'link' && !accessibleName(el, role)) {
+      try {
+        return collapse(new URL(realUrl(el.href)).pathname, 40);
+      } catch (e) {
+        return '';
+      }
+    }
+    return '';
+  }
+
+  function outlineState(el) {
+    var state = [];
+    if (el.disabled === true || el.getAttribute('aria-disabled') === 'true') state.push('disabled');
+    if (el.checked === true || el.getAttribute('aria-checked') === 'true') state.push('checked');
+    if (el.getAttribute('aria-selected') === 'true') state.push('selected');
+    var expanded = el.getAttribute('aria-expanded');
+    if (expanded === 'true') state.push('expanded');
+    else if (expanded === 'false') state.push('collapsed');
+    var current = el.getAttribute('aria-current');
+    if (current && current !== 'false') state.push('current');
+    if (el.tagName === 'SELECT' && el.options) state.push(el.options.length + ' options');
+    return state;
+  }
+
+  /**
+   * An address the other tools will accept, checked before it is handed over.
+   *
+   * selectorFor builds a readable chain and gives up after six levels, so on a deep
+   * page the top of the chain floats free: `li:nth-of-type(3) > a` matches inside
+   * every list on the page, and the first match is rarely the one being described. A
+   * reference that resolves to something else is worse than no reference at all —
+   * the tap lands elsewhere and reports success. So the readable form is offered
+   * first and verified, and anything ambiguous falls back to an exact :nth-child
+   * path anchored at the nearest ancestor that is not.
+   */
+  function resolvesTo(selector, el) {
+    try {
+      return !!selector && document.querySelector(selector) === el;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function refFor(el) {
+    var readable = selectorFor(el);
+    if (resolvesTo(readable, el)) return readable;
+
+    var steps = [];
+    var node = el;
+    while (node && node.parentElement) {
+      var parent = node.parentElement;
+      steps.unshift(':nth-child(' + ([].indexOf.call(parent.children, node) + 1) + ')');
+      var anchor = selectorFor(parent);
+      if (resolvesTo(anchor, parent)) return anchor + ' > ' + steps.join(' > ');
+      node = parent;
+    }
+    // Nothing above it was unambiguous either, so anchor at the document itself.
+    return node === document.documentElement ? 'html > ' + steps.join(' > ') : readable;
+  }
+
+  function pageOutline(query) {
+    var limit = Math.min(Math.max(parseInt(query.limit, 10) || 200, 1), 500);
+    var wantText = query.text !== false;
+    var onlyViewport = query.viewport !== false;
+    var root = document.body || document.documentElement;
+    var cut = { hidden: 0, offscreen: 0, dropped: 0, text: 0, shadow: 0 };
+    var found = [];
+
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+      acceptNode: function (el) {
+        if (OUTLINE_PRUNE[el.tagName.toUpperCase()]) return NodeFilter.FILTER_REJECT;
+        if (el.hasAttribute('data-custom-ai-view')) return NodeFilter.FILTER_REJECT;
+        /*
+         * Whatever is inside a shadow root is unreachable from here: every tool on
+         * this API addresses elements with document.querySelector, which does not
+         * cross that boundary. Listing what cannot then be clicked would be worse
+         * than saying nothing, so the hosts are counted and the count is reported —
+         * a page of web components must not come back looking empty.
+         */
+        if (el.shadowRoot) cut.shadow++;
+        /*
+         * aria-hidden, inert and display:none take their whole subtree with them,
+         * and that is where most of the saving on a real page is: the closed menu,
+         * the route that is not mounted, the four dialogs a design system parks in
+         * the markup against the day they are needed. checkVisibility() with no
+         * arguments answers for exactly the inherited part of "is this rendered", so
+         * pruning on it cannot drop a child that is visible. Opacity and visibility
+         * are asked per element instead, since a descendant may turn either back on.
+         */
+        if (el.getAttribute('aria-hidden') === 'true' || el.hasAttribute('inert') || notRendered(el)) {
+          if (kindOf(roleOf(el))) cut.hidden++;
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    var openControls = [];
+    var node;
+    while ((node = walker.nextNode())) {
+      if (found.length >= OUTLINE_SCAN_CAP) break;
+
+      var role = roleOf(node);
+      var kind = kindOf(role);
+      var name = kind ? accessibleName(node, role) : '';
+      // An image with no name has declared itself decoration; a frame with none is
+      // still worth a row, because its contents are invisible from out here.
+      if (role === 'image' && !name) continue;
+
+      if (!kind && wantText) {
+        // A <label>'s words belong to the control it names, and are reported there.
+        var text = node.tagName === 'LABEL' ? '' : collapse(ownText(node), 120);
+        if (text.length > 1) {
+          role = 'text';
+          kind = 'text';
+          name = text;
+        }
+      }
+      if (!kind) continue;
+
+      var rect = node.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0) || hiddenByStyle(node) || fadedOut(node)) {
+        cut.hidden++;
+        continue;
+      }
+      if (onlyViewport ? !intersectsViewport(rect) : !intersectsDocument(rect)) {
+        cut.offscreen++;
+        continue;
+      }
+
+      /*
+       * The words inside a button are the button's name, and were already reported
+       * as such; repeating them as prose is the padding that makes these outlines
+       * expensive. The stack rather than a single flag, because a control inside a
+       * control still leaves the outer one open.
+       */
+      while (openControls.length && !openControls[openControls.length - 1].contains(node)) {
+        openControls.pop();
+      }
+      if (kind === 'text' && openControls.length) continue;
+      if (kind === 'control') openControls.push(node);
+
+      found.push({
+        kind: kind,
+        role: role,
+        name: name,
+        value: kind === 'control' ? outlineValue(node, role) : '',
+        state: kind === 'control' ? outlineState(node) : [],
+        el: node,
+        take: false,
+      });
+    }
+
+    /*
+     * Controls first, prose second.
+     *
+     * On an article the paragraphs outnumber the buttons twenty to one, so a cap
+     * applied in document order spends the whole budget before it reaches the footer
+     * navigation — the one thing an agent needs to get off the page. Both passes keep
+     * document order among what they take, and the rows go out in that order, so the
+     * outline still reads top to bottom.
+     */
+    var budget = limit;
+    for (var pass = 0; pass < 2 && budget > 0; pass++) {
+      for (var i = 0; i < found.length && budget > 0; i++) {
+        if (found[i].take || (found[i].kind === 'text') !== (pass === 1)) continue;
+        found[i].take = true;
+        budget--;
+      }
+    }
+
+    var entries = [];
+    for (var j = 0; j < found.length; j++) {
+      var item = found[j];
+      if (!item.take) {
+        if (item.kind === 'text') cut.text++;
+        else cut.dropped++;
+        continue;
+      }
+      var entry = { role: item.role, name: item.name, ref: refFor(item.el) };
+      if (item.value) entry.value = item.value;
+      if (item.state.length) entry.state = item.state;
+      entries.push(entry);
+    }
+
+    var doc = document.documentElement;
+    return {
+      entries: entries,
+      counts: cut,
+      scope: onlyViewport ? 'viewport' : 'page',
+      limit: limit,
+      viewportBox: {
+        w: window.innerWidth || 0,
+        h: window.innerHeight || 0,
+        x: window.scrollX || 0,
+        y: window.scrollY || 0,
+        pageHeight: doc ? doc.scrollHeight : 0,
+      },
+      url: realUrl(location.href),
+      title: document.title,
+    };
+  }
 
   // ------------------------------------------------------------- DOM tree
 
@@ -2174,6 +2613,29 @@
           var result = findMatches(data);
           toParent(Object.assign({ type: 'dp:found', rid: data.rid }, result));
         });
+        break;
+      /*
+       * The outline of the page.
+       *
+       * Not inside safe(): safe() catches, warns into a console nobody outside the
+       * frame is reading, and never replies — so a throw in the walk would come back
+       * as "the page did not answer in time", sending whoever read it to look at the
+       * proxy, which was fine. Everything in the payload is a string, a number or an
+       * array of them, so it survives the structured clone without help; it must NOT
+       * be passed through clonable(), which caps an array at a hundred items and
+       * would quietly cut the outline in half.
+       */
+      case 'dp:cmd:snapshot':
+        (function () {
+          try {
+            toParent(Object.assign({ type: 'dp:snapshot', rid: data.rid }, pageOutline(data)));
+          } catch (err) {
+            toParent({
+              type: 'dp:snapshot', rid: data.rid,
+              error: String(err && err.message ? err.message : err),
+            });
+          }
+        })();
         break;
       case 'dp:cmd:edit':
         safe('edit', function () {
