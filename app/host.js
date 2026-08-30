@@ -77,6 +77,15 @@ const MIME = {
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0']);
 
+/** The site an address belongs to, for anything that has to be kept per site. */
+function originOf(url) {
+  try {
+    return new URL(String(url || '')).origin;
+  } catch {
+    return '';
+  }
+}
+
 const isMixedContent = url => {
   try {
     const u = new URL(url);
@@ -690,9 +699,13 @@ class AppHost {
         break;
       }
       case 'revert-edits': {
-        const cleared = this.proxy.clearEdits();
+        // The site in this window, not every site: the button sits beside the
+        // page it undoes, and dropping another window's experiment is not what
+        // anyone pressing it is asking for.
+        const site = originOf(session.currentUrl);
+        const cleared = this.proxy.clearEdits(site);
         session.post({ type: 'command', name: 'reload', payload: { mode: 'normal' } });
-        this.log('reverted ' + cleared + ' live edit(s)');
+        this.log('reverted ' + cleared + ' live edit(s) on ' + (site || 'this page'));
         break;
       }
       case 'error':
@@ -1982,13 +1995,29 @@ class AppHost {
             removeClass: body.removeClass,
             remove: body.remove,
           };
+          const editing = body.window ? this.sessions.get(body.window) : await sessionSoon();
+          const site = originOf(editing && editing.currentUrl);
           const result = await this.ask(body, Object.assign({ type: 'dp:cmd:edit' }, spec), 'dp:edited');
-          // Only a change that actually landed is worth replaying on the next load.
-          if (result && result.ok && body.persist !== false) this.proxy.rememberEdit(spec);
-          return Object.assign({}, result, { persisted: body.persist !== false, edits: this.proxy.edits.length });
+          // Only a change that actually landed is worth replaying on the next load,
+          // and only onto the site it was written for.
+          if (result && result.ok && body.persist !== false) this.proxy.rememberEdit(spec, site);
+          return Object.assign({}, result, {
+            persisted: body.persist !== false,
+            site,
+            edits: this.proxy.editsFor(site).length,
+          });
         },
 
-        '/edits': async () => ({ edits: this.proxy.edits }),
+        '/edits': async body => {
+          const s = body.window ? this.sessions.get(body.window) : await sessionSoon();
+          const site = originOf(s && s.currentUrl);
+          // This site's by default; everything only when asked, because "what is
+          // in force here" and "what exists anywhere" are different questions and
+          // the second one used to be the only answer available.
+          return body.all === true
+            ? { edits: this.proxy.editsFor(null), scope: 'every site' }
+            : { edits: this.proxy.editsFor(site), scope: site || 'this window' };
+        },
 
         // ---- material: where it goes, and getting it all in one move
 
@@ -2025,11 +2054,15 @@ class AppHost {
         },
 
         '/revert': async body => {
-          const count = this.proxy.clearEdits();
           const session = body.window ? this.sessions.get(body.window) : this.sessions.values().next().value;
+          // This site's edits, unless everything is asked for. Reverting used to
+          // drop every edit on every site, so undoing one experiment silently
+          // undid the one running in the other window.
+          const site = body.all === true ? null : originOf(session && session.currentUrl);
+          const count = this.proxy.clearEdits(site);
           // The page still holds the old changes, so it has to be re-fetched.
           if (session) session.post({ type: 'command', name: 'reload', payload: { mode: 'normal' } });
-          return { cleared: count };
+          return { cleared: count, scope: site || 'every site' };
         },
 
         '/tree': async body => this.ask(body, {

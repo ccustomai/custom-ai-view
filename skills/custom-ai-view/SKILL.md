@@ -50,6 +50,22 @@ custom_ai_view_collect    { }                  screenshot + markup + console + s
 custom_ai_view_library    { }                  what has been captured, filed by site
 ```
 
+## The one thing it cannot do
+
+**The renderer is Chromium, whatever the frame says.** An iPhone frame is a real
+iPhone's geometry — its millimetres, its bezels, its notch, its safe areas, its
+touch behaviour — around a Chromium engine wearing an iOS user-agent. It is not
+WebKit.
+
+So layout, spacing, tap targets, safe areas and anything about *size* are true.
+A rendering bug specific to Safari — a flexbox quirk, a date input, a
+`backdrop-filter` difference, an iOS-only scroll behaviour — will not reproduce
+here and cannot be ruled out here. When the question is "why does this look
+wrong **on my iPhone**", this narrows it; it does not settle it. Say so rather
+than reporting the frame as proof.
+
+Firefox likewise is not available.
+
 ## Things that will otherwise cost you a round trip
 
 **Find by selector, not by visible text, unless the text is yours.** A site

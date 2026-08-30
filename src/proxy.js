@@ -171,7 +171,14 @@ class PreviewProxy {
      * anything you want to look at twice — and worse, a screenshot taken after a
      * reload would quietly show the unedited page.
      */
-    this._edits = [];
+    /*
+     * Live edits, by site.
+     *
+     * They are replayed into every page load, so one flat list meant an edit
+     * written for one site was applied to the next one whose markup happened to
+     * match the same selector.
+     */
+    this._edits = new Map();
     /**
      * What the page asked the network for, per window: windowId -> ring of entries.
      *
@@ -195,19 +202,45 @@ class PreviewProxy {
     this._tokenWindows = new Map();
   }
 
+  /**
+   * The edits in force, for one site or for all of them.
+   *
+   * Kept per site because they are replayed into every page load, and a global
+   * list meant a selector written for one site was applied to the next one that
+   * happened to match it — `.header { display: none }` written while looking at
+   * one product quietly removing the header of another. The selector is the
+   * only thing an edit carries, and selectors are not unique across the web.
+   */
+  editsFor(origin) {
+    if (!origin) {
+      const all = [];
+      for (const [site, list] of this._edits) {
+        list.forEach(e => all.push(Object.assign({ site }, e)));
+      }
+      return all;
+    }
+    return (this._edits.get(origin) || []).slice();
+  }
+
   get edits() {
-    return this._edits.slice();
+    return this.editsFor(null);
   }
 
   /**
    * Remember an edit so it is re-applied on load. Edits to the same selector merge,
    * so setting a colour twice leaves one instruction rather than two.
    */
-  rememberEdit(edit) {
+  rememberEdit(edit, origin) {
     if (!edit || !edit.selector) return;
-    const existing = this._edits.find(e => e.selector === edit.selector);
+    const site = origin || '';
+    let list = this._edits.get(site);
+    if (!list) {
+      list = [];
+      this._edits.set(site, list);
+    }
+    const existing = list.find(e => e.selector === edit.selector);
     if (!existing) {
-      this._edits.push(JSON.parse(JSON.stringify(edit)));
+      list.push(JSON.parse(JSON.stringify(edit)));
       return;
     }
     if (edit.style) existing.style = Object.assign({}, existing.style, edit.style);
@@ -219,9 +252,14 @@ class PreviewProxy {
     if (edit.remove) existing.remove = true;
   }
 
-  clearEdits() {
-    const count = this._edits.length;
-    this._edits = [];
+  clearEdits(origin) {
+    if (origin) {
+      const count = (this._edits.get(origin) || []).length;
+      this._edits.delete(origin);
+      return count;
+    }
+    const count = this.editsFor(null).length;
+    this._edits.clear();
     return count;
   }
 
@@ -1024,7 +1062,7 @@ class PreviewProxy {
         proxy: this.origin,
         profile: this.profile,
         hasViewport,
-        edits: this._edits,
+        edits: this.editsFor(target.origin),
       })};</script>` +
       `<script src="/${parsed.token}/__dp/inject.js"></script>`;
 

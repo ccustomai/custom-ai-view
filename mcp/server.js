@@ -260,7 +260,12 @@ const TOOLS = [
         device: DEVICE_ARG,
         orientation: { type: 'string', enum: ['portrait', 'landscape'] },
         selector: { type: 'string', description: 'CSS selector, required for mode "element".' },
-        scale: { type: 'number', description: 'Pixel density of the capture, 1 to 4. Default 2.' },
+        scale: {
+          type: 'number',
+          description: 'Pixel density, 1 to 4. Default 1 when the image comes back inline, '
+            + '2 when it is also being saved — an inlined @2x image is four times the bytes '
+            + 'for detail nothing reads.',
+        },
         window: WINDOW_ARG,
         save: {
           type: 'boolean',
@@ -271,17 +276,36 @@ const TOOLS = [
       additionalProperties: false,
     },
     run: async args => {
-      const r = await call('/screenshot', Object.assign({ inline: true, file: args.save === true }, args));
+      /*
+       * Scale 1 by default, not 2.
+       *
+       * The image is base64 into a context window, and @2x is four times the
+       * bytes for detail nothing reads: a caller looking at a phone screenshot
+       * is judging layout, not counting pixels. Where the file is being kept —
+       * for a person to open later — the extra density is worth having, so
+       * saving raises it.
+       */
+      const scale = args.scale || (args.save === true ? 2 : 1);
+      const r = await call('/screenshot',
+        Object.assign({ inline: true, file: args.save === true }, args, { scale }));
       // Which browser took the picture is the difference between the user's screen and
       // a stranger's, so it is stated rather than left to be assumed.
       const provenance = r.live
         ? 'the open window, with the user\'s session'
         : 'a fresh copy, signed out' +
           (r.liveFailed ? ' — the open window could not be captured: ' + r.liveFailed : '');
+      const kb = r.data ? Math.round((r.data.length * 3) / 4 / 1024) : 0;
       return {
         text:
           'Screenshot ' + r.width + '×' + r.height + ' (' + r.mode + ') — ' + provenance +
-          (r.file ? '\nSaved to ' + r.file : ''),
+          (kb ? '  ·  ' + kb + ' KB' : '') +
+          (r.file ? '\nSaved to ' + r.file : '') +
+          // A picture is the most expensive answer this server gives. Where a
+          // cheaper one would have done, say so once rather than never.
+          (kb > 150
+            ? '\nThis cost ' + kb + ' KB. custom_ai_view_snapshot describes what is on the '
+              + 'screen for about a thousandth of that, and custom_ai_view_audit measures it.'
+            : ''),
         image: r.data ? { data: r.data, mimeType: 'image/png' } : null,
       };
     },
@@ -502,8 +526,18 @@ const TOOLS = [
   },
   {
     name: 'custom_ai_view_edits',
-    description: 'List the live edits currently being replayed into every page load.',
-    inputSchema: { type: 'object', properties: { window: WINDOW_ARG }, additionalProperties: false },
+    description:
+      'The live edits being replayed into this site on every load. Edits are kept per '
+      + 'site, so a selector written here is not applied to the next site that happens to '
+      + 'match it. Pass all to see every site\'s.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        all: { type: 'boolean', description: 'Every site, not just the one on screen.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
     run: async args => {
       const r = await call('/edits', args);
       if (!r.edits || !r.edits.length) return { text: 'No live edits are active.' };
@@ -519,8 +553,17 @@ const TOOLS = [
   {
     name: 'custom_ai_view_revert',
     description:
-      'Drop every live edit and reload, putting the page back exactly as the site serves it.',
-    inputSchema: { type: 'object', properties: { window: WINDOW_ARG }, additionalProperties: false },
+      'Drop this site\'s live edits and reload, putting the page back exactly as the site '
+      + 'serves it. Only this site\'s, unless all is passed: undoing one experiment should '
+      + 'not silently undo the one running in another window.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        all: { type: 'boolean', description: 'Every site\'s edits, everywhere.' },
+        window: WINDOW_ARG,
+      },
+      additionalProperties: false,
+    },
     run: async args => {
       const r = await call('/revert', args);
       return { text: r.cleared ? 'Reverted ' + r.cleared + ' edit(s) and reloaded.' : 'There was nothing to revert.' };
